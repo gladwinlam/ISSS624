@@ -7,46 +7,47 @@ editor: visual
 
 Doing Geo spatial Analysis
 
-
 ```{r}
 pacman::p_load(sf, tidyverse)  #load more than 1 library one shot
 ```
 
 Import into Polygon data Frame
+
 ```{r}
 mpsz = st_read(dsn = "Hands-on_Ex01/data/geospatial", 
                   layer = "MP14_SUBZONE_WEB_PL")
 
 ```
 
-CRS is coordinate system. SVY21 coordinate system
-323 polygon features
-15 fields
-
+CRS is coordinate system. SVY21 coordinate system 323 polygon features 15 fields
 
 Import into line feature data Frame
+
 ```{r}
 cyclingpath = st_read(dsn = "Hands-on_Ex01/data/geospatial", 
                          layer = "CyclingPathGazette")
 ```
 
 Importing kml data frame
+
 ```{r}
 preschool = st_read("Hands-on_Ex01/data/geospatial/pre-schools-location-kml.kml")
 
 ```
+
 CRS is WGS84 system
 
 Accessing the column geometries which is in class SFC
+
 ```{r}
 st_geometry(mpsz)
 ```
 
 Learning more about attribute of of dataframe. Glimpse is from tidyverse
+
 ```{r}
 glimpse(mpsz)
 ```
-
 
 ```{r}
 head(mpsz, 5)
@@ -57,17 +58,18 @@ head(mpsz, 5)
 ```{r}
 plot(mpsz, max.plot = 15)
 ```
+
 Plot only geometry (only want the outline and nothing else)
 
 ```{r}
 plot(st_geometry(mpsz))
 ```
+
 Plotting specific attribute
 
 ```{r}
 plot(mpsz["PLN_AREA_N"])
 ```
-
 
 ```{r}
 mpsz["PLN_AREA_N"]
@@ -83,7 +85,6 @@ Sometimes during importing, the coordinate system might be wrong. need to check 
 st_crs(mpsz) #SVY21 should be 3414 but in here is it 9001. SO wrongly tagged
 ```
 
-
 ```{r}
 mpsz3414 <- st_set_crs(mpsz, 3414) #change the code back to 3414
 st_crs(mpsz3414) #checked and changed
@@ -91,12 +92,12 @@ st_crs(mpsz3414) #checked and changed
 
 To calculate distance you need projected coorindate systems (2D) vs geographic coordinate system (flat)
 
-
 ```{r}
 st_geometry(preschool) #check geometry of preschool
 ```
 
 From one coordinate system to another need to reproject. Use ST_transform, cannot just use set_crs().This method does not reproject.
+
 ```{r}
 preschool3414 <- st_transform(preschool, 
                               crs = 3414)
@@ -112,28 +113,26 @@ listings <- as_tibble(read.csv("Hands-on_Ex01/data/aspatial/listings.csv"))
 head(listings)
 ```
 
-
 ```{r}
 list(listings)
 colnames(listings)
 ```
-
 
 ```{r}
 listings_sf <- st_as_sf(listings, coords = c("longitude","latitude"),
          crs = 4326) %>%
   st_transform(crs = 3414)
 ```
-- coords argument requires you to provide the column name of the x-coordinates first then followed by the column name of the y-coordinates.
 
-- crs argument requires you to provide the coordinates system in epsg format. EPSG: 4326 is wgs84 Geographic Coordinate System and EPSG: 3414 is Singapore SVY21 Projected Coordinate System. You can search for other country’s epsg code by referring to epsg.io.
+-   coords argument requires you to provide the column name of the x-coordinates first then followed by the column name of the y-coordinates.
 
-- %>% is used to nest st_transform() to transform the newly created simple feature data frame into svy21 projected coordinates system.
+-   crs argument requires you to provide the coordinates system in epsg format. EPSG: 4326 is wgs84 Geographic Coordinate System and EPSG: 3414 is Singapore SVY21 Projected Coordinate System. You can search for other country's epsg code by referring to epsg.io.
+
+-   %\>% is used to nest st_transform() to transform the newly created simple feature data frame into svy21 projected coordinates system.
 
 ```{r}
 glimpse(listings_sf)
 ```
-
 
 ```{r}
 buffer_cycling <- st_buffer(cyclingpath, 
@@ -152,21 +151,17 @@ Count number of preschool on topi each planning zone
 mpsz3414$`PreSch Count`<- lengths(st_intersects(mpsz3414, preschool3414))
 ```
 
-
 ```{r}
 summary(mpsz3414$`PreSch Count`)
 ```
-
 
 ```{r}
 plot(mpsz3414['PreSch Count'])
 ```
 
-
 ```{r}
 top_n(mpsz3414, 1, `PreSch Count`)
 ```
-
 
 ```{r}
 mpsz3414$Area <- mpsz3414 %>%
@@ -175,17 +170,14 @@ mpsz3414$Area <- mpsz3414 %>%
 mpsz3414$Area
 ```
 
-
 ```{r}
 mpsz3414 <- mpsz3414 %>%
   mutate(`PreSch Density` = `PreSch Count`/Area * 1000000)
 ```
 
-
 ```{r}
 hist(mpsz3414$`PreSch Density`)
 ```
-
 
 ```{r}
 ggplot(data = mpsz3414,
@@ -200,7 +192,6 @@ ggplot(data = mpsz3414,
 
 ```
 
-
 ```{r}
 ggplot(data = mpsz3414, 
        aes( x = as.numeric(`PreSch Density`), y = as.numeric(`PreSch Count`))) + 
@@ -210,3 +201,321 @@ ggplot(data = mpsz3414,
 
 ```
 
+## Choropleth Mapping with R
+
+Require package readr, tidyr, dplyr, sf
+
+```{r}
+pacman::p_load(sf, tmap, tidyverse)
+```
+
+### Import Data
+
+```{r}
+mpsz <- st_read(dsn = "Hands-on_Ex01/data/geospatial", 
+                layer = "MP14_SUBZONE_WEB_PL")
+popdata <- read_csv("Hands-on_Ex01/data/aspatial/respopagesextod2011to2020.csv")
+
+```
+
+### Data Cleaning and Wrangling
+
+Extract only 2022 data. Columns needed are PA, SZ, Young, Economy Active, Aged, Total, Dependency
+
+YOUNG: age group 0 to 4 until age groyup 20 to 24, ECONOMY ACTIVE: age group 25-29 until age group 60-64, AGED: age group 65 and above, TOTAL: all age group, and DEPENDENCY: the ratio between young and aged against economy active group
+
+```{r}
+popdata2020 <- popdata %>%
+  filter(Time == 2020) %>%
+  group_by(PA, SZ, AG) %>%
+  summarise(`POP` = sum(`Pop`)) %>%
+  ungroup()%>%
+  pivot_wider(names_from=AG, 
+              values_from=POP) %>%
+  mutate(YOUNG = rowSums(.[3:6])
+         +rowSums(.[12])) %>%
+mutate(`ECONOMY ACTIVE` = rowSums(.[7:11])+
+rowSums(.[13:15]))%>%
+mutate(`AGED`=rowSums(.[16:21])) %>%
+mutate(`TOTAL`=rowSums(.[3:21])) %>%  
+mutate(`DEPENDENCY` = (`YOUNG` + `AGED`)
+/`ECONOMY ACTIVE`) %>%
+  select(`PA`, `SZ`, `YOUNG`, 
+       `ECONOMY ACTIVE`, `AGED`, 
+       `TOTAL`, `DEPENDENCY`)
+```
+
+### Making PA and SZ columns uppercase
+
+Goal is to join attribute data and geospatial data
+
+```{r}
+popdata2020 <- popdata2020 %>%
+  mutate_at(.vars = vars(PA, SZ), 
+          .funs = funs(toupper)) %>%
+  filter(`ECONOMY ACTIVE` > 0)
+
+#left join data tables
+
+mpsz_pop2020 <- left_join(mpsz, popdata2020, 
+          by = c("SUBZONE_N" = "SZ"))
+```
+
+Write mpsz_pop2020 to a rds file
+
+```{r}
+write_rds(mpsz_pop2020, "Hands-on_Ex01/data/rds/mpszpop2020.rds")
+```
+
+## Plotting choropleth map
+
+Plot a map where fill of location is dependent on Dependency column Basic plot:
+
+```{r}
+tmap_mode("plot")
+qtm(mpsz_pop2020, 
+    fill = "DEPENDENCY")
+```
+
+Advance Plot with more elements used:
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY", 
+          style = "quantile", 
+          palette = "Blues",
+          title = "Dependency ratio") +
+  tm_layout(main.title = "Distribution of Dependency Ratio by planning subzone",
+            main.title.position = "center",
+            main.title.size = 1.2,
+            legend.height = 0.45, 
+            legend.width = 0.35,
+            frame = TRUE) +
+  tm_borders(alpha = 0.5) +
+  tm_compass(type="8star", size = 2) +
+  tm_scale_bar() +
+  tm_grid(alpha =0.2) +
+  tm_credits("Source: Planning Sub-zone boundary from Urban Redevelopment Authorithy (URA)\n and Population data from Department of Statistics DOS", 
+             position = c("left", "bottom"))
+```
+
+### Drawing a base map
+
+```{r}
+tm_shape(mpsz_pop2020) +
+  tm_polygons()
+```
+
+Adding fill based on Dependency. Add under tm_polygons()
+
+```{r}
+tm_shape(mpsz_pop2020) +
+  tm_polygons("DEPENDENCY")
+
+```
+
+If we choose to use tm_fill, it does not include borders. This is because tm_polygons() is actually tm_fill() + tm_borders()
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY")
+```
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY") +
+  tm_borders(lwd = 0.1,  alpha = 1) #alpha param controls transparency
+```
+
+Other arguments for tm_borders: col = border colour, lwd = border line width. The default is 1, and lty = border line type. The default is "solid".
+
+## Data Classification with Tmap
+
+Classify observations into data ranges or classes
+
+tmap provides a total ten data classification methods, namely: fixed, sd, equal, pretty (default), quantile, kmeans, hclust, bclust, fisher, and jenks.
+
+Quantile classification Method
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY",
+          n = 5,
+          style = "jenks") +
+  tm_borders(alpha = 0.5)
+
+```
+Equal Data classification Method
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY",
+          n = 5,
+          style = "equal") +
+  tm_borders(alpha = 0.5)
+
+```
+## Building Choropleth map with self defined breaks
+
+We can define the breaking points of the classes by adding it into the tm_fill() argument.
+
+Lets try using quantile to break.
+
+```{r}
+summary(mpsz_pop2020$DEPENDENCY)
+```
+
+Based on above, we will follow the quantiles to set as our break points
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY",
+          breaks = c(0, 0.60, 0.70, 0.80, 0.90, 1.00)) +
+  tm_borders(alpha = 0.5)
+```
+We can also define our colour scheme by using the palette argument in the tm_fill()
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY",
+          n = 6,
+          style = "quantile",
+          palette = "Blues") +
+  tm_borders(alpha = 0.5)
+```
+If we want to reverse shading (ie darker means lower dependency), wwe add a "-" in front of colour in the palette.
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY",
+          style = "quantile",
+          palette = "-Greens") +
+  tm_borders(alpha = 0.5)
+```
+## Map Layouts
+
+We can add objects into map such as compass, margins, adjust aspects ratio etc
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY", 
+          style = "jenks", 
+          palette = "Blues", 
+          legend.hist = TRUE, 
+          legend.is.portrait = TRUE,
+          legend.hist.z = 0.1) +
+  tm_layout(main.title = "Distribution of Dependency Ratio by planning subzone \n(Jenks classification)",
+            main.title.position = "center",
+            main.title.size = 1,
+            legend.height = 0.45, 
+            legend.width = 0.35,
+            legend.outside = FALSE,
+            legend.position = c("right", "bottom"),
+            frame = FALSE) +
+  tm_borders(alpha = 0.5)
+```
+## Map style
+
+Use tmap_style() to change
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY", 
+          style = "quantile", 
+          palette = "-Greens") +
+  tm_borders(alpha = 0.5) +
+  tmap_style("classic")
+```
+## Adding objects
+
+Eg compass, scale bar, grid
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill("DEPENDENCY", 
+          style = "quantile", 
+          palette = "Blues",
+          title = "No. of persons") +
+  tm_layout(main.title = "Distribution of Dependency Ratio \nby planning subzone",
+            main.title.position = "center",
+            main.title.size = 1.2,
+            legend.height = 0.45, 
+            legend.width = 0.35,
+            frame = TRUE) +
+  tm_borders(alpha = 0.5) +
+  tm_compass(type="8star", size = 2) +
+  tm_scale_bar(width = 0.15) +
+  tm_grid(lwd = 0.1, alpha = 0.2) +
+  tm_credits("Source: Planning Sub-zone boundary from Urban Redevelopment Authorithy (URA)\n and Population data from Department of Statistics DOS", 
+             position = c("left", "bottom"))
+
+```
+
+```{r}
+tmap_style("white")
+```
+
+##Faucet graphs
+
+We can also have multiple small map images in one image
+
+We can do this by controlling tm_fill and tm_layout
+
+```{r}
+tm_shape(mpsz_pop2020)+
+  tm_fill(c("YOUNG", "AGED"),
+          style = "equal", 
+          palette = "Blues") +
+  tm_layout(legend.position = c("right", "bottom")) +
+  tm_borders(alpha = 0.5) +
+  tmap_style("white")
+```
+
+```{r}
+tm_shape(mpsz_pop2020)+ 
+  tm_polygons(c("DEPENDENCY","AGED"),
+          style = c("equal", "quantile"), 
+          palette = list("Blues","Greens")) +
+  tm_layout(legend.position = c("right", "bottom"))
+
+```
+using tm_facets
+```{r}
+tm_shape(mpsz_pop2020) +
+  tm_fill("DEPENDENCY",
+          style = "quantile",
+          palette = "Blues",
+          thres.poly = 0) + 
+  tm_facets(by="REGION_N", 
+            free.coords=TRUE, 
+            drop.shapes=TRUE) +
+  tm_layout(legend.show = FALSE,
+            title.position = c("center", "center"), 
+            title.size = 20) +
+  tm_borders(alpha = 0.5)
+```
+
+```{r}
+youngmap <- tm_shape(mpsz_pop2020)+ 
+  tm_polygons("YOUNG", 
+              style = "quantile", 
+              palette = "Blues")
+
+agedmap <- tm_shape(mpsz_pop2020)+ 
+  tm_polygons("AGED", 
+              style = "quantile", 
+              palette = "Blues")
+
+tmap_arrange(youngmap, agedmap, asp=1, ncol=2)
+```
+Mapping based on selection criterion
+```{r}
+tm_shape(mpsz_pop2020[mpsz_pop2020$REGION_N=="CENTRAL REGION", ])+
+  tm_fill("DEPENDENCY", 
+          style = "quantile", 
+          palette = "Blues", 
+          legend.hist = TRUE, 
+          legend.is.portrait = TRUE,
+          legend.hist.z = 0.1) +
+  tm_layout(legend.outside = TRUE,
+            legend.height = 0.45, 
+            legend.width = 5.0,
+            legend.position = c("right", "bottom"),
+            frame = FALSE) +
+  tm_borders(alpha = 0.5)
+
+```
