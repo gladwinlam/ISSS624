@@ -25,6 +25,6 @@
     "href": "Hands_on_Ex_1.html#getting-started",
     "title": "Hands-on Exercise 1",
     "section": "Getting Started",
-    "text": "Getting Started\nThis is the getting started paragraph"
+    "text": "Getting Started\nThis is the getting started paragraph\n---\ntitle: “Hands-on Exercise 1”\neditor: visual\n---\n\n1+2\n\n[1] 3"
   }
 ]
