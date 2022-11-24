@@ -1,9 +1,9 @@
 ---
-title: "About"
+title: "About Me"
 ---
 
-About this site
+Hello there! I am Gladwin. I am a current Postgraduate student with SMU doing analytics.
 
-```{r}
-1 + 1
-```
+I would like to use this site to showcase some of my work in geospatial analytics which is a pretty niche area.
+
+In my free time i enjoy exploring outdoors and greeneries. I love cycling and all things that involves speed! :D
