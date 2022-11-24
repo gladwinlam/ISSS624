@@ -9,6 +9,10 @@ website:
         menu: 
           - text: Hands-on Exercise 1
             href: Hands_on_Ex_1.qmd
+      - text: In-Class Exercise
+        menu:
+          - text: In-Class Exercise 1
+            href: Inclass-ex1/inclass-ex1.qmd
     right:
       - href: index.qmd
         text: Home
@@ -16,7 +20,7 @@ website:
 
 format:
   html:
-    theme: cosmo
+    theme: zephyr
     css: styles.css
     toc: true
 

@@ -336,6 +336,7 @@ Classify observations into data ranges or classes
 tmap provides a total ten data classification methods, namely: fixed, sd, equal, pretty (default), quantile, kmeans, hclust, bclust, fisher, and jenks.
 
 Quantile classification Method
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY",
@@ -344,7 +345,9 @@ tm_shape(mpsz_pop2020)+
   tm_borders(alpha = 0.5)
 
 ```
+
 Equal Data classification Method
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY",
@@ -353,6 +356,7 @@ tm_shape(mpsz_pop2020)+
   tm_borders(alpha = 0.5)
 
 ```
+
 ## Building Choropleth map with self defined breaks
 
 We can define the breaking points of the classes by adding it into the tm_fill() argument.
@@ -371,7 +375,9 @@ tm_shape(mpsz_pop2020)+
           breaks = c(0, 0.60, 0.70, 0.80, 0.90, 1.00)) +
   tm_borders(alpha = 0.5)
 ```
+
 We can also define our colour scheme by using the palette argument in the tm_fill()
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY",
@@ -380,6 +386,7 @@ tm_shape(mpsz_pop2020)+
           palette = "Blues") +
   tm_borders(alpha = 0.5)
 ```
+
 If we want to reverse shading (ie darker means lower dependency), wwe add a "-" in front of colour in the palette.
 
 ```{r}
@@ -389,9 +396,11 @@ tm_shape(mpsz_pop2020)+
           palette = "-Greens") +
   tm_borders(alpha = 0.5)
 ```
+
 ## Map Layouts
 
 We can add objects into map such as compass, margins, adjust aspects ratio etc
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY", 
@@ -410,9 +419,11 @@ tm_shape(mpsz_pop2020)+
             frame = FALSE) +
   tm_borders(alpha = 0.5)
 ```
+
 ## Map style
 
 Use tmap_style() to change
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY", 
@@ -421,9 +432,11 @@ tm_shape(mpsz_pop2020)+
   tm_borders(alpha = 0.5) +
   tmap_style("classic")
 ```
+
 ## Adding objects
 
 Eg compass, scale bar, grid
+
 ```{r}
 tm_shape(mpsz_pop2020)+
   tm_fill("DEPENDENCY", 
@@ -473,7 +486,9 @@ tm_shape(mpsz_pop2020)+
   tm_layout(legend.position = c("right", "bottom"))
 
 ```
+
 using tm_facets
+
 ```{r}
 tm_shape(mpsz_pop2020) +
   tm_fill("DEPENDENCY",
@@ -502,7 +517,9 @@ agedmap <- tm_shape(mpsz_pop2020)+
 
 tmap_arrange(youngmap, agedmap, asp=1, ncol=2)
 ```
+
 Mapping based on selection criterion
+
 ```{r}
 tm_shape(mpsz_pop2020[mpsz_pop2020$REGION_N=="CENTRAL REGION", ])+
   tm_fill("DEPENDENCY", 
