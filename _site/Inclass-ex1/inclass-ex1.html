@@ -152,6 +152,15 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     </ul>
   </li>
   <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-hand2" role="button" data-bs-toggle="dropdown" aria-expanded="false">Hand2</a>
+    <ul class="dropdown-menu" aria-labelledby="nav-menu-hand2">    
+        <li>
+    <a class="dropdown-item" href="../Hands-on_Ex02/handson2.html">
+ <span class="dropdown-text">Hands-on Exercise 2</span></a>
+  </li>  
+    </ul>
+  </li>
+  <li class="nav-item dropdown ">
     <a class="nav-link dropdown-toggle" href="#" id="nav-menu-in-class-exercise" role="button" data-bs-toggle="dropdown" aria-expanded="false">In-Class Exercise</a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-in-class-exercise">    
         <li>
@@ -166,7 +175,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <a class="nav-link" href="../index.html">Home</a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="../about.html">About</a>
+    <a class="nav-link" href="../about.html">About Me</a>
   </li>  
 </ul>
               <div id="quarto-search" class="" title="Search"></div>
@@ -1515,7 +1524,7 @@ Non-symmetric neighbours list</code></pre>
 <section id="computing-row-standardised-weights-matrix" class="level2">
 <h2 class="anchored" data-anchor-id="computing-row-standardised-weights-matrix">7. Computing Row Standardised Weights Matrix</h2>
 <p>Neighbours around the spatial unit will be assigned weights based on (1/# number of neighbours). Each will have equal weights.</p>
-<p>Each neighboring polygon will be assigned equal weight using (style="W").</p>
+<p>Each neighboring polygon will be assigned equal weight using (style=“W”).</p>
 <p>The zero.policy=TRUE option allows for lists of non-neighbors.&nbsp;</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb60"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a>rswm_q <span class="ot">&lt;-</span> <span class="fu">nb2listw</span>(wm_q, <span class="at">style=</span><span class="st">"W"</span>, <span class="at">zero.policy =</span> <span class="cn">TRUE</span>)</span>
@@ -1541,7 +1550,7 @@ W 88 7744 88 37.86334 365.9147</code></pre>
 [1] 0.2 0.2 0.2 0.2 0.2</code></pre>
 </div>
 </div>
-<p>Each neighbor's income will be multiplied by 0.125 before being totaled.</p>
+<p>Each neighbor’s income will be multiplied by 0.125 before being totaled.</p>
 <p>Another way is to assign weights based on distance</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb64"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a>rswm_ids <span class="ot">&lt;-</span> <span class="fu">nb2listw</span>(wm_q, <span class="at">glist=</span>ids, <span class="at">style=</span><span class="st">"B"</span>, <span class="at">zero.policy=</span><span class="cn">TRUE</span>)</span>
