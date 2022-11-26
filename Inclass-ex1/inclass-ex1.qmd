@@ -135,7 +135,7 @@ wm_r <- poly2nb(hunan, queen = FALSE)
 summary(wm_r)
 ```
 
-### 4.3  Visualising Contiguity Weights
+### 4.3 Visualising Contiguity Weights
 
 We can connect a spatial unit to its neighbour using lines. To do so we will need to compute centroids of each spatial unit and connect to its neighbors using the centroids.
 
@@ -165,7 +165,7 @@ plot(hunan$geometry, border="lightgrey")
 plot(wm_q, coords, pch = 19, cex = 0.6, add = TRUE, col= "red")
 ```
 
-### 4.4  Plotting Queen and Rook Contiguity based neighbor maps side by side
+### 4.4 Plotting Queen and Rook Contiguity based neighbor maps side by side
 
 We use par() function to control the subplots. Left is queen, right is rook's.
 
@@ -290,7 +290,7 @@ ids
 
 Neighbours around the spatial unit will be assigned weights based on (1/# number of neighbours). Each will have equal weights.
 
-Each neighboring polygon will be assigned equal weight using (style=\"W\").
+Each neighboring polygon will be assigned equal weight using (style="W").
 
 The zero.policy=TRUE option allows for lists of non-neighbors. 
 
@@ -303,7 +303,7 @@ rswm_q
 rswm_q$weights[1]  #weights of 10th spatial unit
 ```
 
-Each neighbor\'s income will be multiplied by 0.125 before being totaled.
+Each neighbor's income will be multiplied by 0.125 before being totaled.
 
 Another way is to assign weights based on distance
 
