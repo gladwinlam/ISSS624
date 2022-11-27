@@ -1,0 +1,171 @@
+---
+title: "Inclass Exercise 2"
+execute:
+  warning: false
+  message: false
+format: html
+editor: visual
+---
+
+# Overview
+
+In this example, we need the following packages:
+
+-   ***sf***
+
+-   ***tidyverse***
+
+-   ***tmap***
+
+-   ***spdep***
+
+-   ***funModeling*** - for Exploratory data analysis
+
+```{r}
+pacman::p_load(sf, spdep, tmap, tidyverse, funModeling)
+```
+
+We will be looking at Nigeria water point information. We will be extracting data from water point data exchange platform and from geo-boundaries. The former provides information on the water point data while the latter provides Local Government Area Boundary data of Nigeria.
+
+## 1. Import data
+
+We will save the water point shapefile into a simple feature data table using st_read().
+
+CRS = 4326 parameter will be used. This corresponds to WGS84 coordinate system. Data will take a while to load as there are 4million rows of data in geo_export file. Once loaded, we filter out water point data related to Nigeria only.
+
+```{r}
+#| eval: false
+wp <- st_read(dsn = "geodata",
+        layer = "geo_export",
+        crs = 4326) %>%
+  filter(clean_coun == "Nigeria")  #no need change projection system
+```
+
+We save the sf data table using write_rds() of readr package in rds data format. We will refer to wp_nga variable from here onward.
+
+```{r}
+#| eval: false
+write_rds(wp, "geodata/wp_nga.rds")
+```
+
+Next, we import the boundary data of Nigeria into a simple feature data table.
+
+```{r}
+nga <- st_read(dsn = "geodata",
+               layer = "nga_admbnda_adm2_osgof_271122",
+               crs = 4326)
+
+```
+
+## 2. Data Wrangling
+
+```{r}
+head(read_rds("geodata/wp_nga.rds"),20)
+```
+
+From the above, we can see a number of NAs. We will replace NAs in 'status_cle' column with "unknown". 'status_cle' shows the water point status and reports whether it is functional or not.
+
+```{r}
+wp_nga <- read_rds("geodata/wp_nga.rds") %>%
+  mutate(status_cle = replace_na(status_cle, "Unknown"))
+```
+
+We can visualise the various statuses of waterpoint using a bar chart with ***freq()*** function from funModeling library.
+
+```{r}
+freq(data=wp_nga, 
+     input = 'status_cle')
+```
+
+As we see, less than half of the water points in Nigeria is functional.
+
+```{r}
+wp_nga <- read_rds("geodata/wp_nga.rds") %>%
+  mutate(status_cle = replace_na(status_cle, "Unknown"))
+wp_nga
+```
+
+Next we filter out water points that are functional.
+
+```{r}
+wpt_functional <- wp_nga %>%
+  filter(status_cle %in%
+           c("Functional",
+             "Functional but not in use",
+             "Functional but needs repair"))
+```
+
+```{r}
+freq(data=wpt_functional, 
+     input = 'status_cle')
+
+```
+
+We also filter out non functional water points.
+
+```{r}
+wpt_nonfunctional <- wp_nga %>%
+  filter(status_cle %in%
+           c("Abandoned/Decommissioned", 
+             "Abandoned",
+             "Non-Functional",
+             "Non functional due to dry season",
+             "Non-Functional due to dry season"))
+freq(data=wpt_nonfunctional, 
+     input = 'status_cle')
+```
+
+We create another data table where status of water point is unknown.
+
+```{r}
+wpt_unknown <- wp_nga %>%
+  filter(status_cle == "Unknown")
+```
+
+```{r}
+lengths(st_intersects(nga, wp_nga))
+```
+
+We use st_intersects() to find the various status of water point in Nigeria and use length() to measure the count.
+
+```{r}
+nga_wp <- nga %>% 
+  mutate(`total wpt` = lengths(
+    st_intersects(nga, wp_nga))) %>%
+  mutate(`wpt functional` = lengths(
+    st_intersects(nga, wpt_functional))) %>%
+  mutate(`wpt non-functional` = lengths(
+    st_intersects(nga, wpt_nonfunctional))) %>%
+  mutate(`wpt unknown` = lengths(
+    st_intersects(nga, wpt_unknown)))
+```
+
+Lastly, we save the the output in a new data table.
+
+```{r}
+nga_wp <- nga_wp %>%
+  mutate(pct_functional = `wpt functional`/`total wpt`) %>%
+  mutate(`pct_non-functional` = `wpt non-functional`/`total wpt`)
+
+write_rds(nga_wp, "geodata/nga_wp.rds")
+```
+
+```{r}
+nga_wp <- read_rds("geodata/nga_wp.rds")
+total <- qtm(nga_wp, "total wpt") +
+ tm_layout(legend.outside = TRUE,
+            legend.outside.position = 'right')
+wp_functional <- qtm(nga_wp, "wpt functional")+
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = 'right')
+wp_nonfunctional <- qtm(nga_wp, "wpt non-functional")+
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = 'right')
+unknown <- qtm(nga_wp, "wpt unknown") +
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = 'right')
+
+
+tmap_arrange(total, wp_functional, wp_nonfunctional, unknown, asp=1, ncol=2)
+
+```
