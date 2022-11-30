@@ -1,0 +1,1165 @@
+---
+title: "Take Home Exercise 1"
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+# Overview
+
+In this example, we use the following libraries:
+
+-   ***sf***
+
+-   ***tidyverse***
+
+-   ***tmap***
+
+-   ***spdep***
+
+-   ***funModeling***
+
+-   ***shinyjs***
+
+The below code chunk below will load the following libraries. If the libraries are not installed, installation will begin and the libraries will be loaded after.
+
+```{r}
+pacman::p_load(sf, spdep, tmap, tidyverse, funModeling, shinyjs)
+```
+
+------------------------------------------------------------------------
+
+# Dataset
+
+Data will be from 2 sources. One dataset will provide information on water points. This data is aspatial. The other provides information on Local Government Area boundary of Nigeria. This data is geospatial.
+
+### Aspatial data
+
+We will be using the WPdx+ dataset from [WPdx Global Data Repositories](https://www.waterpointdata.org/access-data/). Data downloaded is in point shapefile format.
+
+### Geospatial data
+
+We will be using the Nigeria Level-2 Administrative Boundary polygon features GIS data. Data is downloaded from [geoBoundaries](https://www.geoboundaries.org/) and is in shapefile format.
+
+------------------------------------------------------------------------
+
+# Objective
+
+1.  Load dataset with appropriate coordinate systems
+
+2.  Determine proportion of functional and non-function water point at Local Goverment Area boundary level after join dataset together
+
+    -   Plot thematic map using proportion of function, nonfunctional and functional vs nonfunctional as a data classification
+
+3.  Perform outlier/cluster analysis with various spatial association methods
+
+    -   Plot thematic map of clusters and outliers
+
+4.  Perform hotspot analysis with spatial association method
+
+    -   Plot thematic map of hot and cold spots
+
+------------------------------------------------------------------------
+
+# 1. Import data
+
+We will save the water point, point shapefile into a simple feature object data table using ***st_read()***. A sf data table is a data frame with columns as its attributes and rows as its features with a geometry column. Since we are looking at Nigeria water points only, we will filter the data using **%\>%.**
+
+Data is in WSG84 Geographic coordinate system. We will input crs = 4326 such that data is parsed correctly.
+
+```{r}
+wp <- st_read(dsn = "geodata",
+        layer = "geo_export",
+        crs = 4326) %>%
+  filter(clean_coun == "Nigeria") 
+```
+
+There are 73 attributes with 95,008 rows.
+
+Using the ***st_geometry()*** we can see the first 5 geometries of the features. They are in point format.
+
+```{r}
+st_geometry(wp)
+```
+
+Using ***glimpse()***, we can see the 73 attributes and its data format.
+
+```{r}
+glimpse(wp)
+```
+
+As we can see from above, data is in a geographic coordinate system (GCS). For such system, units are angular and features are defined in 3D compared to a projected coordinate system (PCS) where units are linear and features are defined in 2D.
+
+![](https://www.esri.com/arcgis-blog/wp-content/uploads/2022/02/grid2.png){fig-align="center" width="446"}
+
+*Image by (Smith, 2020) from [here](https://www.esri.com/arcgis-blog/products/arcgis-pro/mapping/coordinate-systems-difference/)*
+
+A PCS is needed when distance is needed to be calculated and when you want to draw data on a flat map. As we will be doing distance based analysis, we will transform the GCS to PCS using the below code chunk:
+
+```{r}
+wp_proj <- st_transform(wp, crs = 26391)
+st_geometry(wp_proj)
+```
+
+Next, we save the sf data table using ***write_rds()*** of readr package in rds data format. We will refer to wp_nga variable from here onward.
+
+```{r}
+write_rds(wp_proj, "geodata/wp_nga.rds")
+```
+
+Next, we import the NGA boundary data of Nigeria into a simple feature data table.
+
+```{r}
+nga <- st_read(dsn = "geodata",
+               layer = "nga_admbnda_adm2_osgof_20190417",
+               crs = 4326)
+```
+
+Similarly, shape file is in a multipolygon shape file using a GCS of WGS84. To be consistent, we will also transform from the data from a GCS to a PCS.
+
+```{r}
+nga_proj <- st_transform(nga, crs = 26391)
+st_geometry(nga_proj)
+```
+
+```{r}
+glimpse(nga_proj)
+```
+
+From the summary table, there are many NA values in some of the columns.
+
+We will save the sf data table into a rds file for the LGA data.
+
+```{r}
+write_rds(nga_proj, "geodata/nga.rds")
+```
+
+We can take a lot at the base map of LGA Nigeria boundaries.
+
+```{r}
+plot(st_geometry(nga_proj))
+```
+
+# 2. Task 1
+
+Based on the above, we have used sf method to import and save it in a simple feature data frame **.rds** format and converting the GCS to PCS using EPSG 26391.
+
+------------------------------------------------------------------------
+
+# 3. Data Wrangling
+
+The "status_cle" of water point data frame contains the statuses of the water point on whether it is functional, non functional or others.
+
+```{r}
+read_rds("geodata/wp_nga.rds") %>%
+  pull(status_cle) %>%
+  table(useNA = "ifany")
+```
+
+## 3.1 Removing NAs
+
+R interprets NA as blank when instead it actually means unknown. We can use ***mutate()*** function from dplyr package. ***mutate()*** is a window function which applies a desired operation to every row in the sf data frame. Here we will replace "NA" with "Unknown" and overwrite the **wp_nga.rds** file.
+
+```{r}
+wp_nga <- read_rds("geodata/wp_nga.rds") %>%
+  mutate(status_cle = replace_na(status_cle, "Unknown"))
+```
+
+We use ***fre()*** function from funModeling library to draw frequency bar charts of the various functions.
+
+```{r}
+freq(data=wp_nga, 
+     input = 'status_cle')
+```
+
+## 3.2 Categorizing Water Point Status
+
+We can categorise the status into 3 groups - Functional, Non Function, Unknown
+
+| Functional                  | Non-Functional                   | Unknown |
+|-----------------------------|----------------------------------|---------|
+| Functional                  | Non-Functional                   | Unknown |
+| Functional but needs repair | Non Functional due to dry season |         |
+| Functional but not in use   | Abandoned/Decommissioned         |         |
+|                             | Abandoned                        |         |
+|                             | Non functional due to dry season |         |
+
+: We break the category each into a dataframe on its own. We use the ***filter()*** function from dplyr.
+
+```{r}
+wpt_functional <- wp_nga %>%
+  filter(status_cle %in%
+           c("Functional", 
+             "Functional but not in use",
+             "Functional but needs repair"))
+
+wpt_nonfunctional <- wp_nga %>%
+  filter(status_cle %in%
+           c("Abandoned/Decommissioned", 
+             "Abandoned",
+             "Non-Functional",
+             "Non functional due to dry season",
+             "Non-Functional due to dry season"))
+
+wpt_unknown <- wp_nga %>%
+  filter(status_cle == "Unknown")
+```
+
+## 3.3 Exploratory Data Analysis of Functional vs Non Functional Water Points
+
+For functional water points, the breakdown is:
+
+```{r}
+freq(data=wpt_functional, 
+     input = 'status_cle')
+```
+
+For non - functional water points, the breakdown is:
+
+```{r}
+freq(data=wpt_nonfunctional, 
+     input = 'status_cle')
+```
+
+------------------------------------------------------------------------
+
+# 4. Task 2 &3
+
+**Objective: Derive proportion of functional and non functional water point at LGA level and combing the 2 data tables into 1 data table.**
+
+To do so, we will need to compute the number of water points in each LGA boundary polygon and see how many of them fall in functional and non functional categories. We can perform a point in polygon method to do the counting.
+
+First, we use ***st_intersects()*** which overlays the water points from wp_proj onto nga_proj. We then use lengths() function to count the number of water points within each polygon
+
+```{r}
+nga <- read_rds("geodata/nga.rds")
+nga
+```
+
+We append 4 columns into **nga** sf data table - **total water point, water point functional, water point non-functional** and **water point unknown** and save it under a new sf data table called **nga_wp**.
+
+```{r}
+nga_wp <- nga %>% 
+  mutate(`total_wpt` = lengths(
+    st_intersects(nga, wp_nga))) %>%
+  mutate(`wpt_func` = lengths(
+    st_intersects(nga, wpt_functional))) %>%
+  mutate(`wpt_nonfunc` = lengths(
+    st_intersects(nga, wpt_nonfunctional))) %>%
+  mutate(`wpt_unknown` = lengths(
+    st_intersects(nga, wpt_unknown)))
+```
+
+Next, we compute the percentage of the functional categories.
+
+```{r}
+nga_wp <- nga_wp %>%
+  mutate(`pct_func` = `wpt_func`/`total_wpt`)
+```
+
+Next, we compute the percentage of the non-functional categories.
+
+```{r}
+nga_wp <- nga_wp %>%
+  mutate(`pct_nonfunc` = `wpt_nonfunc`/`total_wpt`)
+```
+
+Next, we compute the percentage of the unknown categories.
+
+```{r}
+nga_wp <- nga_wp %>%
+  mutate(`pct_unknown` = `wpt_unknown`/`total_wpt`)
+```
+
+```{r}
+nga_wp %>%
+  select(c(`pct_func`,`pct_nonfunc`,`pct_unknown`))
+```
+
+As the focus is on analysing the non functional water points, we will zoom into the polygons with non functional water points.
+
+```{r}
+summary(nga_wp$`pct_nonfunc`)
+```
+
+From above, we can see the mean percentage of non functional water points in each LGA level is 36.6%. There are also 13 NAs. We will deal with it using the code chunk below:
+
+```{r}
+nga_wp$pct_func <- ifelse(nga_wp$total_wpt == 0 & is.na(nga_wp$pct_func), 0, nga_wp$pct_func)
+
+nga_wp$pct_nonfunc <- ifelse(nga_wp$total_wpt == 0 & is.na(nga_wp$pct_nonfunc), 0, nga_wp$pct_nonfunc)
+
+nga_wp$pct_unknown <- ifelse(nga_wp$total_wpt == 0 & is.na(nga_wp$pct_unknown), 0, nga_wp$pct_unknown)
+```
+
+```{r}
+summary(nga_wp$`pct_nonfunc`)
+```
+
+After removing NAs and replacing it with 0, the new average percentage of non functional water point is 35.9%.
+
+```{r}
+top_n(nga_wp, 5, `pct_nonfunc`)$SD_EN
+```
+
+These are the top 5 areas with highest percentage of non functional water points.
+
+```{r}
+ggplot(data=nga_wp, 
+       aes(x= as.numeric(`pct_nonfunc`)))+
+  geom_histogram(bins=30, 
+                 color="black", 
+                 fill="white") +
+  labs(title = "Distribution of Non-Functioning Water Points in Nigeria",
+      x = "Proportion of faulty water points (%)",
+      y = "Frequency") +
+  geom_density(alpha=.2, fill="#FF6666") + 
+  geom_vline(aes(xintercept=mean(`pct_nonfunc`)),
+            color="blue", linetype="dashed", size=1)
+```
+
+From the histogram above, we can see distribution is positively skewed. The areas with very high percentage of non functional water points are more rare.
+
+## 4.1 Choropleth Mapping
+
+In this section we will construct Thematic Mapping to show the spatial distribution of functional and non functional water point rate at LGA level using tmap library.
+
+The thematic mapping palette can be chosen from a range of options. We can use the below code to find out the various options:
+
+```{r}
+#| eval: false
+tmaptools::palette_explorer()
+```
+
+Firstly, the thematic mapping is based on the discrete data class interval classification of the percentage of functional and non functional water point. The way we classify the intervals will have an impact on the thematic representation of the map.
+
+The classification options we have are: **`"cat"`**, **`"fixed"`**, **`"sd"`**, **`"equal"`**, **`"pretty"`**, **`"quantile"`**, **`"kmeans"`**, **`"hclust"`**, **`"bclust"`**, **`"fisher"`**, **`"jenks"`**, **`"dpih"`**, **`"headtails"`**, 
+
+The jenk natural breaks style below classified into intervals by identifying groups of similar values and maximizes the differences.
+
+```{r}
+tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "jenks",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Non Functional water points by LGA level (Jenks classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+```
+
+Next, we can trying building class intervals equally.
+
+```{r}
+tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "equal",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Non Functional water points by LGA level (Equal classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+```
+
+We can also use quantile.
+
+```{r}
+tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "quantile",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Non Functional water points by LGA level (Quantile classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+```
+
+We can also split using bagged clustering to cluster the percentages into intervals.
+
+```{r}
+tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "bclust",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Non Functional water points by LGA level (Bagged Clustering classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+```
+
+Are they different? To analyse we can use ***tmap_arrange()*** to put them together to compare side by side
+
+```{r}
+nf_1 <-tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "jenks",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Non Functioal (Jenks classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+nf_2 <- tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "equal",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Non Functioal (Equal classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+nf_3 <- tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "quantile",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Non Functioal (Quantile classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+nf_4 <- tm_shape(nga_wp)+
+  tm_fill("pct_nonfunc",
+          style = "bclust",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Non Functional (Bagged Clustering\nclassification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+
+tmap_arrange(nf_1, nf_2, nf_3, nf_4)
+```
+
+From the above, we can see the thematic of the map changes based on how we classify the data. There seems to be some clustering of similarly non functional percentage of water points in LGA level boundaries. However we should do a formal statistical test to see if there is spatial association between the LGA level boundaries instead of relying on visualisation to draw conclusions.
+
+We will select bagged classification as the bagged classification is a popular clustering machine learning technique with proven good performance.
+
+We do the same for functional water points.
+
+```{r}
+a1 <-tm_shape(nga_wp)+
+  tm_fill("pct_func",
+          style = "jenks",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Functional Points (Jenks classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+a2 <- tm_shape(nga_wp)+
+  tm_fill("pct_func",
+          style = "equal",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Functional Points (Equal classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+a3<- tm_shape(nga_wp)+
+  tm_fill("pct_func",
+          style = "quantile",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Functional Points (Quantile classification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+a4 <- tm_shape(nga_wp)+
+  tm_fill("pct_func",
+          style = "bclust",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Functional Points (Bagged Clustering\nclassification)",
+            main.title.size = 1,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+
+tmap_arrange(a1, a2, a3, a4)
+```
+
+We can put functional and non functional water point distribution maps side by side
+
+```{r}
+tmap_arrange(a4, nf_4)
+```
+
+As expected, polygons where there are more functional water points have less non-functional water points and vice versa.
+
+We can also create an interactive map by using t***map_mode("view")***. We can add bubbles using ***tm_bubbles()*** and add labels to include the cities. Below code chunk is used to overlay the percentage of non functional water points on the map. The size of the bubble is proportion to the percentage.
+
+```{r}
+tmap_mode("view")
+tm_shape(nga_wp) + 
+  tm_bubbles(size = "pct_nonfunc", col = "red", border.lwd = 2, border.col = "black") +
+  tm_tiles("Stamen.TonerLabels")
+```
+
+We create another version for functional water points.
+
+```{r}
+tmap_mode("view")
+tm_shape(nga_wp) + 
+  tm_bubbles(size = "pct_func", col = "blue", border.lwd = 2, border.col = "white") +
+  tm_tiles("Stamen.TonerLabels")
+```
+
+For both functional and non functional water points, we will select the data class interval using bagged cluster style.
+
+Next, we reduce the overall sf data table size of nga_wp by selecting only the useful columns. We save the new table into a new **.rds** file
+
+```{r}
+nga_wp_s <- nga_wp %>%
+  select(3:4, 9:10, 18:23)
+
+write_rds(nga_wp_s, "geodata/nga_wp_s.rds")
+```
+
+```{r}
+nga_wp_s <- read_rds("geodata/nga_wp_s.rds")
+nga_wp_s
+```
+
+------------------------------------------------------------------------
+
+# 5. Task 4
+
+**Objective: Perform a cluster and outlier analysis**
+
+Based on the previous visualisation, LGA boundaries where there are higher proportion of non-functional water points seem to appear close to other LGA boundaries with high non-functional water points. To validate this hypothesis, we can perform analysis of spatial association to see if these proportion variables indeed are connected spatially.
+
+This association analysis is done in 2 steps:
+
+1.  Check if there is spatial association using Global spatial autocorrelation measures
+
+2.  If there is global autocorrelation, we can use the local spatial autocorrelation measures to check if the polygon is a cluster or outlier using the value of the test statistics
+
+## 5.1 Choosing a Spatial Weighting Method
+
+Spatial association analysis always involves neighbours of the polygon in focus. We assign weights to the neighbours surrounding the polygon being studied in a matrix by calculating and summing up their weighted average.
+
+There are several methods assigning spatial weighting methods:
+
+-   *Contiguity based weighting method (based on shared boundaries)*
+
+-   *Distanced based weighting method*
+
+-   *Inverse distance weighting method*
+
+-   *K nearest neighbour weighting method*
+
+As seen from base map, there is a wide variation in polygon size across Nigeria. Additionally wp_nga is a point data. Hence I will be choosing the distance based weighting method.
+
+There are 2 options for distance based weighting methods:
+
+-   *Fixed distance weight matrix*
+
+-   *Adaptive distance weight matrix*
+
+I will be using the adaptive distance weight matrix because the polygons of the LGA boundaries in nga_wp are in different shapes and sizes. If fixed distance is used, larger polygons may have less neighbours compared to smaller polygons with the same centroid to centroid distance. Also more dense areas have more neighbours than less dense areas.
+
+The below code chunk identifies the longitude and latitude of each centroid using ***st_centroid function()***.
+
+```{r}
+longitude <- map_dbl(nga_wp_s$geometry, ~st_centroid(.x)[[1]])
+latitude <- map_dbl(nga_wp_s$geometry, ~st_centroid(.x)[[2]])
+```
+
+We combine them together using ***cbind()*** by joining them column wise.
+
+```{r}
+coords <- cbind(longitude, latitude)
+head(coords)
+```
+
+I will use the ***knn2nb()*** function from spdep package to create a neighbour list of class nb. ***knearneigh()*** identifies the neighbours of each polygon and ***knn2nb()*** puts them in a list. In this scenario, we are using K nearest neighbour adaptive distance approach to identify the neighbours. We select 6 neighbours to start with.
+
+```{r}
+set.seed(1)
+knn6 <- knn2nb(knearneigh(coords, k=6))
+knn6
+```
+
+We take a glimpse of the list of neighbours with ***str()***.
+
+```{r}
+str(knn6)
+```
+
+We can also visualise the neighbourhood linkages using a plot. See the code chunk below:
+
+```{r}
+plot(nga_wp_s$geometry, border="lightgrey")
+plot(knn6, coords, pch = 19, cex = 0.3, add = TRUE, col = "red")
+```
+
+The above ***knn2b()*** stores the neighbours into a list but it is not a spatial weight matrix. We can convert it into a spatial object object using ***nb2listw()*** function.
+
+The style argument can take in "W", "B", "C", "U", "minmax" and "S".
+
+-   *"B" - basic binary coding*
+
+-   *"W" - row standardised*
+
+-   *"C" - globally standardised*
+
+-   *"U" - "C" but divided by total number of neighbours*
+
+-   *"S" - Variance stabilising encoding*
+
+We will use the basic binary coding here for simplicity.
+
+```{r}
+knn_lw <- nb2listw(knn6, style = 'B', zero.policy = TRUE)
+summary(knn_lw)
+```
+
+## 5.2 Measuring Global Spatial Autocorrelation
+
+We need to check if there is Global Spatial Autocorrelation. This can be performed using statistical testing to determine if there is spatial autocorrelation globally. The hypothesis are below:
+
+***H0:** Observed spatial pattern of values is likely as any other spatial pattern. Values at one location do not depend on neighbouring location. There is spatial randomness and changing values of one location does not affect another.*
+
+***H1**: There is spatial dependencies. Changing values of one location affects another.*
+
+There are are 2 ways of measuring global spatial autocorrelation:
+
+-   *Global Moran's I*
+
+-   *Global Geary's C*
+
+### 5.2.1 Using Global Moran's I
+
+![](images/paste-CD748C8A.png){fig-align="center" width="425"}
+
+The Moran I statistics can be calculated as above. The assumption to use the test is that the spatial data is normal and randomised.
+
+**Positive I (I\>0)** means a feature has neighbouring features that are similar and this is a cluster feature. **Zero I (I=0)** means a feature has neighbouring features that are randomly distributed. There is no association. **Negative I (I\<0)** eans a feature has neighbouring features that are dissimilar and this is an dispursed feature.
+
+We can use ***moran.test()*** of spdep package to run the test. The z**ero.policy** argument adds in a list of 0 vectors for polygons who do not have neighbours.
+
+[**Non Functional water points**]{.underline}
+
+```{r}
+moran.test(nga_wp_s$pct_nonfunc, 
+           listw=knn_lw, 
+           zero.policy = TRUE, 
+           na.action=na.omit)
+```
+
+Based on the results above, P value \< 0.05. We can reject the null hypothesis, that there is spatial autocorrelation between neighbours. Moran's I statistics is also positive so it points towards clustered observations.\
+
+Since we are unsure whether the spatial data conforms to normality and randomisation, we can calculate the mean value of Moran's I using a Monte Carlo simulation with 1000 rounds.
+
+```{r}
+set.seed(1)
+
+monte_moran_test <- moran.mc(nga_wp_s$pct_nonfunc, 
+                listw=knn_lw, 
+                nsim=999,
+                zero.policy = TRUE, 
+                na.action=na.omit)
+
+monte_moran_test
+```
+
+```{r}
+hist(nga_wp_s$pct_nonfunc, 
+     freq=TRUE, 
+     breaks=20, 
+     xlab= "Monte Carlo Global Moran's I Sampling")
+abline(v=0, 
+       col="blue")
+```
+
+Comparing the Global Moran's I statisitcs between monte carlo simulation and without, they are largely similar. The p values are both \< 0.05 and hence we can confidently reject the null hypothesis that for proportion of non functional water point in Nigeria, there is spatial autocorrelation. This means the distribution of non functional water point in Nigeria is uneven and is higher than it would have been if randomly distributed.
+
+[**Functional water points**]{.underline}
+
+We perform the similar steps for proportion of functional water point.
+
+```{r}
+set.seed(1)
+
+mc_mtest_f <- moran.mc(nga_wp_s$pct_func, 
+                listw=knn_lw, 
+                nsim=999,
+                zero.policy = TRUE, 
+                na.action=na.omit)
+
+mc_mtest_f
+```
+
+Since p value \< 0.05, we rejct null hypothesis. we can conclude that for proportion of functional water point in Nigeria, there is spatial autocorrelation. This means the distribution of functional water point in Nigeria is not even and is higher than it would have been if randomly distribution.
+
+### 5.2.2 Using Global Geary's C
+
+Apart from Moran's I, we can also use Global Geary's C.
+
+![](images/paste-96CE5A5B.png){fig-align="center" width="682"}
+
+**Large C (C\>3)** means a feature has neighbouring features that are dissimilar and this is a dispersed feature. **C =1** means a feature and neighbouring features are randomly arranged. **Small C (C\<1)** means a feature has neighbouring features that are similar and this is a cluster feature.
+
+[**Non Functional water points**]{.underline}
+
+```{r}
+set.seed(1)
+mc_gc_nf <- geary.mc(nga_wp_s$pct_nonfunc, 
+               listw=knn_lw,
+               zero.policy = TRUE,
+               nsim=999)
+mc_gc_nf
+```
+
+Geary C test results align with Moran's I with a small C statistics result that is statistically significant. We are confident there are spatial autocorrelation in the distribution of non functional water point across Nigeria.
+
+[**Functional water points**]{.underline}
+
+```{r}
+set.seed(1)
+mc_gc_f <- geary.mc(nga_wp_s$pct_func, 
+               listw=knn_lw,
+               zero.policy = TRUE,
+               nsim=999)
+mc_gc_f
+```
+
+Geary C test results align with Moran's I with a small C statistics result that is statistically significant. We are confident there are spatial autocorrelation in the distribution of functional water points across Nigeria.
+
+## 5.3 Spatial Correlogram
+
+In this section we will identify how the non functional and functional water points proportion varies with increasing distance from each polygon for each polygon. We use ***sp.correlogram()*** from spdep to compute the spatially lagged values and use ***plot()*** to display the information on a plot.
+
+Style = "B" means binary encoding. Method = "I" means using Moran's I statistics.
+
+[**Non Functional water points**]{.underline}
+
+```{r}
+GC_corr_nf <- sp.correlogram(knn6, 
+                          nga_wp_s$pct_nonfunc, 
+                          order=20, 
+                          method="I", 
+                          style="B",
+                          zero.policy = TRUE)
+plot(GC_corr_nf)
+```
+
+As we can see, there are autocorrelations with up to 10 lags. We need to consider more neighbours in our analysis for non functional water points.
+
+[**Functional water points**]{.underline}
+
+```{r}
+GC_corr_f <- sp.correlogram(knn6, 
+                          nga_wp_s$pct_func, 
+                          order=20, 
+                          method="I", 
+                          style="B",
+                          zero.policy = TRUE)
+plot(GC_corr_f)
+```
+
+As we can see, there are autocorrelations with up to 12 lags. We need to consider more neighbours in our analysis for functional water points.
+
+## 5.4 Cluster and Outlier Analysis
+
+Global Moran I and Global Geary C statistics are only able to tell us if there are global spatial autocorrelation. We concluded that there is. However to identify which polygon has spatial autocorrelation and which does not we will need to turn towards local indicators of spatial association (LISA).
+
+LISA can be computed using Local Moran I statistics with ***localmoran()*** function from **spdep** library. It will output a matrix with:
+
+-   ***Ii:** local Moran's I statistics*
+
+-   ***E.Ii**: expectation of local moran statistic*
+
+-   ***Var.Ii:** variance of local moran statistic*
+
+-   ***Z.Ii:** standard deviate of local moran statistic*
+
+-   ***Pr():** p-value of local moran statistic*
+
+[**Non Functional water points**]{.underline}
+
+```{r}
+localMI_nf <- localmoran(nga_wp_s$pct_nonfunc, knn_lw)
+head(localMI_nf)
+```
+
+```{r}
+colnames(cbind(nga_wp_s,localMI_nf))
+```
+
+Next we append the local Moran I values into the nga_wp_s data table
+
+```{r}
+nga_wp_s_lmi_nf <- cbind(nga_wp_s,localMI_nf) %>%
+  rename("Prob(Li)"="Pr.z....E.Ii..")
+```
+
+### 5.4.1 Visualizing Moran I values
+
+We can plot a choropleth mapping using ***tm_shape(***) and ***tm_fill()*** from **tmap** library. The thematic mapping will be based on the ***Prob(Li)*** values.
+
+```{r}
+prob_nf <- tm_shape(nga_wp_s_lmi_nf) +
+  tm_fill(col = "Prob(Li)", 
+          breaks=c(-Inf, 0.01, 0.025, 0.05, Inf),
+          palette="-Blues", 
+          title = "Local Moran's I pvalues") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Non Functional Water Points by\nLocal Moran P-value",
+            main.title.size = 1,
+            main.title.position = "centre")
+
+prob_nf
+```
+
+LGA boundary areas where Local Moran I pvalues are greater than 0.05 are not significant. This means the proportion of non functional water points in these areas are not outliers or cluster.
+
+```{r}
+li_nf <- tm_shape(nga_wp_s_lmi_nf) +
+  tm_fill(col = "Ii", 
+          style = "pretty", 
+          title = "Local Moran I statisyics ") +
+  tm_layout(main.title = "Non Functional Water Points by\nLocal Moran Statistics",
+            main.title.size = 1,
+            main.title.position = "centre",
+            legend.outside = TRUE) +
+  tm_borders(alpha = 0.5)
+
+li_nf
+```
+
+If we plot a Local Moran I statistics, we can see largely most of the LGA boundaries is a cluster or outlier and there is spatial autocorrelation between the boundaries.
+
+### 5.4.2 Identifying whether LGA Boundary is a cluster or outlier
+
+When Local Moran I statistics is significant, we can conclude the area is either a cluster or outlier. The first step is to plot the Moran scatter plot. The scatter plot shows the relationship between a chosen attribute and its spatially lagged values at neighbouring location. It helps us identify locations of clusters and outliers.
+
+[*Clusters:*]{.underline}
+
+-   HH cluster means centre spatial unit value is high and neighbouring values are also high
+
+-   LL cluster means centre spatial unit value is low and neighbouring values are also low
+
+[*Outliers:*]{.underline}
+
+-   LH outlier means centre spatial unit value is low but neighbouring values are high
+
+-   HL outlier means centre spatial unit value is high but neighbouring values are low
+
+First, we scale the percentage of non functional water points in each polygon. This allows a fairer comparison between the spatially lagged average non functional water point percentage and the non functional water point of a polygon.
+
+We standardise the data using ***scale()***.
+
+```{r}
+nonfunc_std <- scale(nga_wp_s$pct_nonfunc) %>% 
+  as.vector 
+```
+
+We use ***moran.plot()*** to plot the moran scatter plot.
+
+```{r}
+moran.plot(nonfunc_std, knn_lw,
+           labels=as.character(nga_wp_s$ADM2_EN),
+           xlab="z-Non functional water point", 
+           ylab="Spatially Lag z-Non functional water point",
+           pch=19,
+           cex = 0.3)
+```
+
+[*Interpretating the scatter plot:*]{.underline}
+
+The Moran coefficient is equivalent to the slope of regression line on Moran plot. For each axis, the dotted lines represent the average of that attribute. There are also 4 quadrants created by the dotted lines in scatter plot. Each quadrant represents a cluster or outlier.
+
+Top right hand quadrant represents the HH cluster and bottom left represents the LL cluster. A cluster means the centre spatial unit is positively autocorrelated with its neighbours. HH cluster means a polygon is high value and neighbours also high value. LL cluster means a polygon is low value and neighbours low value.
+
+Top left hand quadrant represents the LH outlier and bottom right represents the HL outlier. Outlier means the centre spatial unit is negatively autocorrelated with its neighbours. LH outlier means the polygon is low in value but neighbours are high in value so it is a low outlier. HL outlier means the polygon in the centre is high in value but neighbours are low so it is a high outlier.
+
+We can further analyse to see which LGA boundaries are low or high outliers or low or high clusters. We initialise a zero vector with same length as local MI matrix.
+
+```{r}
+quadrant <- vector(mode="numeric",length=nrow(localMI_nf))
+```
+
+We centre the spatially lagged variable around the mean.
+
+```{r}
+nga_wp_s_lmi_nf$lag_pct <- lag.listw(knn_lw, nga_wp_s$pct_nonfunc)
+DV <- nga_wp_s_lmi_nf$lag_pct - mean(nga_wp_s_lmi_nf$lag_pct)
+```
+
+We also compute average of the local MI statistics to centre the values around the mean. Level of significance will be set at 0.05.
+
+```{r}
+LM_I <- localMI_nf[,1] - mean(localMI_nf[,1])   
+signif <- 0.05
+```
+
+If **LM_I \>0**, it is positive. It is a cluster. If **LM_I\<0** it is negative. It is outlier
+
+If **DV\> 0** means the spatially lagged variable is high. If **DV\<0** means spatially lagged variable is low.
+
+We put all insignificant LGA boundaries into class 0 and the rest into class 1, 2, 3, 4.
+
+```{r}
+quadrant[DV <0 & LM_I>0] <- 1 # LL
+quadrant[DV >0 & LM_I<0] <- 2 # LH
+quadrant[DV <0 & LM_I<0] <- 3 # HL
+quadrant[DV >0 & LM_I>0] <- 4 # HH
+quadrant[localMI_nf[,5] > signif] <- 0
+```
+
+```{r}
+table(quadrant)
+```
+
+```{r}
+nga_wp_s_lmi_nf$quadrant <- quadrant
+colors <- c("#ffffff", "#2c7bb6", "#abd9e9", "#fdae61", "#d7191c")
+clusters <- c("insignificant", "low-low", "low-high", "high-low", "high-high")
+
+nga_wp_s_lmi_nf <- rename(nga_wp_s_lmi_nf, "category"="quadrant")
+
+tmap_mode("plot")
+
+clus_nf <- tm_shape(nga_wp_s_lmi_nf) +
+  tm_fill(col = "category",
+          style = "cat",
+          palette = colors[c(sort(unique(quadrant)))+1], 
+          labels = clusters[c(sort(unique(quadrant)))+1])+
+  tm_borders(alpha=0.5) +
+  tm_layout(main.title = "Non Functional Water Points with\nSpatial Autocorrelation",
+            main.title.size = 1,
+            main.title.position = "centre")
+clus_nf 
+```
+
+For non functional water points, we can see the there is a region of high value clusters located at South West of Nigeria while the low value cluster is diagnoally opposite and located at North East Nigeria.
+
+For outliers, there are some LH outliers located around South West and off central while for HL outliers, they are scattered around the upper half of Nigeria, towards Northern and Eastern parts.
+
+```{r}
+tmap_arrange(prob_nf,clus_nf)
+```
+
+```{r}
+tmap_arrange(li_nf,clus_nf)
+```
+
+### 5.4.3 Functional water points Analysis
+
+[**Functional water points**]{.underline}
+
+In the following section, we will perform the same analysis as previously shown but for functional water points.
+
+```{r}
+localMI_f <- localmoran(nga_wp_s$pct_func, knn_lw)
+
+nga_wp_s_lmi_f <- cbind(nga_wp_s,localMI_f) %>%
+  rename("Prob(Li)"="Pr.z....E.Ii..")
+```
+
+```{r}
+prob_f <- tm_shape(nga_wp_s_lmi_f) +
+  tm_fill(col = "Prob(Li)", 
+          breaks=c(-Inf, 0.01, 0.025, 0.05, Inf),
+          palette="-Reds", 
+          title = "Local Moran's I pvalues") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Functional Water Points by\nLocal Moran P-value",
+            main.title.size = 1,
+            main.title.position = "centre")
+prob_f
+```
+
+```{r}
+li_f <- tm_shape(nga_wp_s_lmi_f) +
+  tm_fill(col = "Ii", 
+          style = "pretty", 
+          title = "Local Moran I statisyics ") +
+  tm_layout(main.title = "Functional Water Points by\nLocal Moran Statistics",
+            main.title.size = 1,
+            main.title.position = "centre",
+            legend.outside = TRUE) +
+  tm_borders(alpha = 0.5)
+
+li_f
+```
+
+```{r}
+class_f <- vector(mode="numeric",length=nrow(localMI_f))
+nga_wp_s_lmi_f$lag_pct <- lag.listw(knn_lw, nga_wp_s$pct_func)
+DV <- nga_wp_s_lmi_f$lag_pct - mean(nga_wp_s_lmi_f$lag_pct)
+LM_I <- localMI_f[,1] - mean(localMI_f[,1])   
+signif <- 0.05
+class_f[DV <0 & LM_I>0] <- 1 # LL
+class_f[DV >0 & LM_I<0] <- 2 # LH
+class_f[DV <0 & LM_I<0] <- 3 # HL
+class_f[DV >0 & LM_I>0] <- 4 # HH
+class_f[localMI_f[,5] > signif] <- 0
+```
+
+```{r}
+nga_wp_s_lmi_f$class <- class_f
+colors <-  c("#ffffff", "#CCFFFF", "#CCCCFF", "#FFFF99", "#FF6666")
+clusters <- c("insignificant", "low-low", "low-high", "high-low", "high-high")
+
+clus_f <- tm_shape(nga_wp_s_lmi_f) +
+  tm_fill(col = "class",
+          style = "cat",
+          palette = colors[c(sort(unique(class_f)))+1], 
+          labels = clusters[c(sort(unique(class_f)))+1])+
+  tm_borders(alpha=0.5) +
+  tm_layout(main.title = "Functional Water Points with\nSpatial Autocorrelation",
+            main.title.size = 1,
+            main.title.position = "centre")
+clus_f 
+```
+
+```{r}
+tmap_arrange(clus_nf, clus_f)
+```
+
+From both graphs above, we can conclude statisitcally and significantly that there are more functional water points in the Northern/ upper half of Nigeria than southern Nigeria/ lower half.
+
+------------------------------------------------------------------------
+
+# 6. Task 5
+
+**Objective: Performing hotspot and cold spot analysis**
+
+## 6.1 Hotspot Analysis
+
+Apart from cluster and outlier detection, we can use LISA to determine hotspots and coldspots. We will use a different statistics known as local Getis and Ord's G-statistics.
+
+![](images/paste-2CC6AEB5.png){fig-align="center" width="365"}
+
+***H0:** Spatial distribution of feature attribute is random spatial process*
+
+***H1:** Spatial distribution of feature attribute is not a random spatial process*
+
+**G -statistics \>0** means there is association with relatively high values of the surrounding locations.
+
+**G -statistics\< 0** means there is association with relatively low values of the surrounding locations.
+
+It looks at neighbours within a defined proximity to identify where either high or low value areas spatially. Here, statistically significant hot-spots are recognised as areas of high values where other areas neighbouring are high in values too. Coldspots are areas of low values where other areas neighbouring are low in values.
+
+***Hotspot:*** high values cluster , ***Coldspot:*** low values cluster
+
+[**Non Functional Water Point**]{.underline}
+
+```{r}
+gi <- localG(nga_wp_s$pct_nonfunc, knn_lw)
+npa_wp_s_nf_gi <- cbind(nga_wp_s, as.matrix(gi)) %>%
+  rename("gstat_adaptive" = "as.matrix.gi.")
+```
+
+```{r}
+head(gi)
+```
+
+```{r}
+hotspot_nf <- tm_shape(npa_wp_s_nf_gi) + 
+  tm_fill(col = "gstat_adaptive", 
+          style = "pretty", 
+          palette="-RdBu", 
+          title = "local Gi") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Non Functional Water Points Hotspots",
+            main.title.size = 1,
+            main.title.position = "centre")
+hotspot_nf
+```
+
+Based on the above, for non functional water points proportion, there is higher proportion of non functional water points in South and South West Nigeria (hot spot). There is lower proportion of non functional water points in North and North East Nigeria. This conclusion aligns with the cluster and outlier analysis. Additionally, in the west, there seems to be cold spot which means there is lower percentage of non functional water point.\
+
+[**Functional Water Point**]{.underline}
+
+```{r}
+gi_f <- localG(nga_wp_s$pct_func, knn_lw)
+npa_wp_s_f_gi <- cbind(nga_wp_s, as.matrix(gi_f)) %>%
+  rename("gstat_adaptive" = "as.matrix.gi_f.")
+```
+
+```{r}
+hotspot_f <- tm_shape(npa_wp_s_f_gi) + 
+  tm_fill(col = "gstat_adaptive", 
+          style = "pretty", 
+          palette="-RdBu", 
+          title = "local Gi") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Functional Water Points Hotspots",
+            main.title.size = 1,
+            main.title.position = "centre")
+hotspot_f
+```
+
+Red areas are hot spots with higher proportion of functioning water point.
+
+------------------------------------------------------------------------
+
+# 7. Data Interpretation
+
+## 7.1 Non Functional Water point
+
+We can put count analysis, cluster analysis and hotspot analysis side by side using ***tmap_arrange()*** function.
+
+```{r}
+tmap_arrange(clus_nf,hotspot_nf, nf_4)
+```
+
+Overall, the 3 graphs are largely aligned with one another. From the above we can see that we should not rely only on 1 graph for our data analytics interpretation.
+
+If we have looked only at the percentage analysis by LGA level (bottom left graph), we would have placed more urgency for repairs in LGA areas where there are higher percentage of non functional water points. This will mean repairing the water points in North West Nigeria regions and LGA areas dispersed across Nigeria where repair efforts will be divided.
+
+However when we look at the spatial autocorrelation analysis (top left), we realise there is high portion of non functioning water point cluster in the South West Nigeria. Repair efforts should be focused in this area first. This was not being highlighted in the graph of percentage analysis by LGA level.
+
+The hotspot analysis has also shown us within a high high cluster, not all LGA areas in the high high cluster have the same severity of non functional water points. For example within the high high cluster identified by the cluster graph, there is a point with hotspot higher than the other surrounding hotspot as shown by the hotspot graph.
+
+The region of higher spatial autorcorrelation and hotspot should be repaired first. This is because a hotspot and autocorrelation mean that the specific LGA area and its neighbouring LGA area have high non functional water points. These areas are areas with lower access to water and should be prioritized to provide a steady water supply to its people.
+
+We take our analysis further be finding out the LGA areas where there are highest percentage of non functional water points,is a high high cluster and a hotpot with the below code chunk.
+
+```{r}
+npa_wp_s_nf_gi_cpy <- npa_wp_s_nf_gi
+npa_nf <- cbind(npa_wp_s_nf_gi_cpy,nga_wp_s_lmi_nf$category)
+
+npa_nf %>%
+  filter(nga_wp_s_lmi_nf.category == 4) %>%
+  arrange(.,desc(gstat_adaptive), desc(pct_nonfunc)) %>%
+  select(ADM2_EN) %>%
+  head(5)
+```
+
+Etim Ekpo, Oruk Anam, Apa, Ukanafun and Burutu should be areas where the water humanitarian aid should focus first as these are the areas with lowest access to water.
+
+## 7.2 Functional Water point
+
+```{r}
+tmap_arrange(clus_f,hotspot_f)
+```
+
+```{r}
+tmap_arrange(a4)
+```
+
+From the 3 graphs above, we can see the northern region of Nigeria has a high proportion of functioning water point. Research study can be done on it to identify what are the reasons why these areas have statically significantly higher functioning water points than other areas of Nigeria. The learning can then be applied to other areas of Nigeria in managing water points.
+
+We can also see the tip of the North West Region in fact does not have a high percentage of functioning water points too. Since it does not have high non functioning, and high functioning water points, data here seems to be not clean or missing and more should be looked into
+
+# References
+
+<https://geocompr.github.io/post/2019/tmap-color-scales/>
+
+<https://cran.r-project.org/web/packages/tmap/vignettes/tmap-getstarted.html>

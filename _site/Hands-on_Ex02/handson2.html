@@ -162,6 +162,19 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <a class="dropdown-item" href="../Inclass-ex1/inclass-ex1.html">
  <span class="dropdown-text">In-Class Exercise 1</span></a>
   </li>  
+        <li>
+    <a class="dropdown-item" href="../Inclass/Inclass2/Inclass2.html">
+ <span class="dropdown-text">In-Class Exercise 2</span></a>
+  </li>  
+    </ul>
+  </li>
+  <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-take-home-exercise" role="button" data-bs-toggle="dropdown" aria-expanded="false">Take-home Exercise</a>
+    <ul class="dropdown-menu" aria-labelledby="nav-menu-take-home-exercise">    
+        <li>
+    <a class="dropdown-item" href="../Takehome/Takehome1/takehome1.html">
+ <span class="dropdown-text">Take-Home Exercise 1</span></a>
+  </li>  
     </ul>
   </li>
 </ul>
@@ -194,7 +207,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   <ul class="collapse">
   <li><a href="#computing-contiguity-spatial-weights" id="toc-computing-contiguity-spatial-weights" class="nav-link" data-scroll-target="#computing-contiguity-spatial-weights">2.1 Computing Contiguity Spatial Weights</a></li>
   <li><a href="#row-standardised-weights-matrix" id="toc-row-standardised-weights-matrix" class="nav-link" data-scroll-target="#row-standardised-weights-matrix">2.2 Row-standardised Weights matrix</a></li>
-  <li><a href="#global-spatial-autocorrelation-morans-i" id="toc-global-spatial-autocorrelation-morans-i" class="nav-link" data-scroll-target="#global-spatial-autocorrelation-morans-i">2.3 Global Spatial Autocorrelation: Moran's I</a></li>
+  <li><a href="#global-spatial-autocorrelation-morans-i" id="toc-global-spatial-autocorrelation-morans-i" class="nav-link" data-scroll-target="#global-spatial-autocorrelation-morans-i">2.3 Global Spatial Autocorrelation: Moran’s I</a></li>
   <li><a href="#global-spatial-autocorrelation-gearys-c" id="toc-global-spatial-autocorrelation-gearys-c" class="nav-link" data-scroll-target="#global-spatial-autocorrelation-gearys-c">2.4 Global Spatial Autocorrelation: Geary’s C</a></li>
   <li><a href="#global-spatial-autocorrelation-spatial-correlogram" id="toc-global-spatial-autocorrelation-spatial-correlogram" class="nav-link" data-scroll-target="#global-spatial-autocorrelation-spatial-correlogram">2.5 Global Spatial Autocorrelation: Spatial Correlogram</a></li>
   </ul></li>
@@ -345,7 +358,7 @@ W 88 7744 88 37.86334 365.9147</code></pre>
 </div>
 <p>For future references, <em>style</em> = “W” refers to equal weights. There are other options:</p>
 <ul>
-<li><p>"W", "B", "C", "U", "minmax" and "S"</p></li>
+<li><p>“W”, “B”, “C”, “U”, “minmax” and “S”</p></li>
 <li><p>B is the basic binary coding</p></li>
 <li><p>W is row standardised (sums over all links to n)</p></li>
 <li><p>C is globally standardised (sums over all links to n)</p></li>
@@ -356,7 +369,7 @@ W 88 7744 88 37.86334 365.9147</code></pre>
 <p>There are 2 types of Global Spatial Autocorrelation statistics. Moran’s I and Geary’s C. We will compute both.</p>
 </section>
 <section id="global-spatial-autocorrelation-morans-i" class="level3">
-<h3 class="anchored" data-anchor-id="global-spatial-autocorrelation-morans-i">2.3 Global Spatial Autocorrelation: Moran's I</h3>
+<h3 class="anchored" data-anchor-id="global-spatial-autocorrelation-morans-i">2.3 Global Spatial Autocorrelation: Moran’s I</h3>
 <p>We perform statistical testing using Moran’s I.</p>
 <p>H0: Spatial randomness - Observed spatial pattern of values is equally likely as any other pattern. Values at one location does not depend and affect another location.</p>
 <div class="cell">
@@ -601,7 +614,7 @@ Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
 </div>
 </div>
 <ul>
-<li><p>Ii: the local Moran's I statistics</p></li>
+<li><p>Ii: the local Moran’s I statistics</p></li>
 <li><p>E.Ii: the expectation of local moran statistic under the randomisation hypothesis</p></li>
 <li><p>Var.Ii: the variance of local moran statistic under the randomisation hypothesis</p></li>
 <li><p>Z.Ii:the standard deviate of local moran statistic</p></li>

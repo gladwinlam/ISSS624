@@ -95,7 +95,7 @@ rswm_q
 
 For future references, *style* = "W" refers to equal weights. There are other options:
 
--   \"W\", \"B\", \"C\", \"U\", \"minmax\" and \"S\"
+-   "W", "B", "C", "U", "minmax" and "S"
 
 -   B is the basic binary coding
 
@@ -111,7 +111,7 @@ If *zero policy* is set to TRUE, weights vectors of zero length are inserted fo
 
 There are 2 types of Global Spatial Autocorrelation statistics. Moran's I and Geary's C. We will compute both.
 
-### 2.3 Global Spatial Autocorrelation: Moran\'s I
+### 2.3 Global Spatial Autocorrelation: Moran's I
 
 We perform statistical testing using Moran's I.
 
@@ -272,7 +272,7 @@ localMI <- localmoran(hunan$GDPPC, rswm_q)
 head(localMI)
 ```
 
--   Ii: the local Moran\'s I statistics
+-   Ii: the local Moran's I statistics
 
 -   E.Ii: the expectation of local moran statistic under the randomisation hypothesis
 
