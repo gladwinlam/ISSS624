@@ -22,10 +22,10 @@ website:
           - text: Take-Home Exercise 1
             href: Takehome/Takehome1/takehome1.qmd
     right:
-      - href: index.qmd
-        text: Home
-      - about.qmd
-
+      - text: Home
+        href: index.qmd
+      - text: About
+        href: about.qmd
 format:
   html:
     theme: zephyr
