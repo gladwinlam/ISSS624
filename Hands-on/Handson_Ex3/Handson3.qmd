@@ -1,6 +1,11 @@
 ---
 title: "Hands On Exercise 3"
 editor: visual
+format: html
+execute:
+  warning: false
+  message: false
+  fig-refine: 3
 ---
 
 # Overview
@@ -17,7 +22,7 @@ pacman::p_load(rgdal, spdep, tmap, sf,
 
 ```{r}
 shan_sf <- st_read(dsn = "data/geospatial", 
-                   layer = "myanmar_township_boundaries")
+                   layer = "myanmar_township_boundaries") #no need CRS. Needed only when dealing with distance stuff. Requires projection.
 shan_sf
 ```
 
@@ -37,6 +42,8 @@ Next we import the aspatial data.
 ```{r}
 ict <- read_csv ("data/aspatial/Shan-ICT.csv")
 summary(ict)
+
+#read_csv() imports as tibble. Field names are preserved. If used read.csv(), imports as base R DF and field names chnage (" " replaced with ".")
 ```
 
 We might be bias if we look at the absolute number itself. Hence we will turn the absolute value into percentage. We define the penetration rate using the code below.
@@ -151,7 +158,7 @@ We need data from geospatial file and from aspatial file. We join using left_joi
 ```{r}
 shan_sf <- left_join(shan_sf, 
                      ict_derived, 
-                     by=c("TS_PCODE"="TS_PCODE"))
+                     by=c("TS_PCODE"="TS_PCODE"))  #need to be left is geometry data, right attribute. Otherwise lose geometry data if reversed.
 ```
 
 shan_sf has now both data. We plot a simple map.
@@ -197,7 +204,7 @@ tm_shape(shan_sf) +
 ## 3. Correlation Analysis
 
 ```{r}
-cluster_vars.cor = cor(ict_derived[,12:17])
+cluster_vars.cor = cor(ict_derived[,12:17]) #only column 12 to 17
 corrplot.mixed(cluster_vars.cor,
          lower = "ellipse", 
                upper = "number",
@@ -212,7 +219,7 @@ First, extract clustering variables. We select "TS.x", "RADIO_PR", "TV_PR", "LLP
 
 ```{r}
 cluster_vars <- shan_sf %>%
-  st_set_geometry(NULL) %>%
+  st_set_geometry(NULL) %>% #to drop the geometry column becos cannot cluster it
   select("TS.x", "RADIO_PR", "TV_PR", "LLPHONE_PR", "MPHONE_PR", "COMPUTER_PR")
 head(cluster_vars,10)
 ```
@@ -306,12 +313,12 @@ hclust_ward <- hclust(proxmat, method = 'ward.D')
 We can visualize the tree.
 
 ```{r}
-plot(hclust_ward, cex = 0.6)
+plot(hclust_ward, cex = 0.6) #CEX is to scale down resolution to 60% to avoid overlapping
 ```
 
 ### 4.5 Selecting optimal clustering method
 
-agnes()function of [**cluster**](https://cran.r-project.org/web/packages/cluster/) package functions like *hclus()*, however, with the *agnes()* function you can also get the agglomerative coefficient, which measures the amount of clustering structure found (values closer to 1 suggest strong clustering structure).
+agnes()function of cluster package functions like *hclus()*, however, with the *agnes()* function you can also get the agglomerative coefficient, which measures the amount of clustering structure found (values closer to 1 suggest strong clustering structure).
 
 We try the different model
 
@@ -320,10 +327,12 @@ m <- c( "average", "single", "complete", "ward")
 names(m) <- c( "average", "single", "complete", "ward")
 
 ac <- function(x) {
-  agnes(shan_ict, method = x)$ac
+  agnes(shan_ict, method = x)$ac #output ac which is index value
 }
 
-map_dbl(m, ac)
+map_dbl(m, ac) #functional programming method - map a list of inputs to a function. Something like looping
+
+#coefficien measures the homogenity
 ```
 
 Ward has highest coefficient. It is the best. We will use wards from here onwards.
@@ -355,7 +364,7 @@ print(gap_stat, method = "firstmax")
 fviz_gap_stat(gap_stat)
 ```
 
-Higher the better. 1 cluster does not make sense so we will select 6.
+Higher the better. 1 cluster does not make sense, same for 2. At least have 3, so we will select 6.
 
 ### 4.7 Visualising Dendrograms
 
@@ -512,7 +521,7 @@ Next we try mapping it on a choropleth map
 ```{r}
 groups_mat <- as.matrix(clust6$groups)
 shan_sf_spatialcluster <- cbind(shan_sf_cluster, as.factor(groups_mat)) %>%
-  rename(`SP_CLUSTER`=`as.factor.groups_mat.`)
+  rename(`SP_CLUSTER`=`as.factor.groups_mat.`) #make sure order is the same before binding
 qtm(shan_sf_spatialcluster, "SP_CLUSTER")
 ```
 
