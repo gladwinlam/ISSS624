@@ -1,0 +1,148 @@
+---
+title: "Hands On Exercise 3"
+editor: visual
+format: html
+execute:
+  warning: false
+  message: false
+  fig-refine: 3
+---
+
+# Overview
+
+In this section, we will analysis the dataset using ClustGeo method which is a soft classifier. ClustGeo method has a limitation. It only allows using the ward method for hierarchical clustering.
+
+```{r}
+#| echo: false
+pacman::p_load(rgdal, spdep, tmap, sf, 
+               ggpubr, cluster, factoextra, NbClust,
+               heatmaply, corrplot, psych, tidyverse, ClustGeo)
+```
+
+## 1. Ward Method Hierarchical Clustering with ClustGeo
+
+First we prepare the data needed. These data has been pre-prepared from handson exer
+
+```{r}
+#| echo: false
+shan_sf <- st_read(dsn = "data/geospatial", 
+                   layer = "myanmar_township_boundaries")
+
+shan_sf <- shan_sf %>%
+   filter(ST %in% c("Shan (East)", "Shan (North)", "Shan (South)"))
+
+ict <- read_csv ("data/aspatial/Shan-ICT.csv")
+
+ict_derived <- ict %>%
+  mutate(`RADIO_PR` = `Radio`/`Total households`*1000) %>%
+  mutate(`TV_PR` = `Television`/`Total households`*1000) %>%
+  mutate(`LLPHONE_PR` = `Land line phone`/`Total households`*1000) %>%
+  mutate(`MPHONE_PR` = `Mobile phone`/`Total households`*1000) %>%
+  mutate(`COMPUTER_PR` = `Computer`/`Total households`*1000) %>%
+  mutate(`INTERNET_PR` = `Internet at home`/`Total households`*1000) %>%
+  rename(`DT_PCODE` =`District Pcode`,`DT`=`District Name`,
+         `TS_PCODE`=`Township Pcode`, `TS`=`Township Name`,
+         `TT_HOUSEHOLDS`=`Total households`,
+         `RADIO`=`Radio`, `TV`=`Television`, 
+         `LLPHONE`=`Land line phone`, `MPHONE`=`Mobile phone`,
+         `COMPUTER`=`Computer`, `INTERNET`=`Internet at home`)
+
+shan_sf <- left_join(shan_sf, 
+                     ict_derived, 
+                     by=c("TS_PCODE"="TS_PCODE"))
+
+cluster_vars <- shan_sf %>%
+  st_set_geometry(NULL) %>% #to drop the geometry column becos cannot cluster it
+  select("TS.x", "RADIO_PR", "TV_PR", "LLPHONE_PR", "MPHONE_PR", "COMPUTER_PR")
+
+row.names(cluster_vars) <- cluster_vars$"TS.x"
+
+shan_ict <- select(cluster_vars, c(2:6))
+
+shan_ict.std <- normalize(shan_ict)
+
+shan_ict.z <- scale(shan_ict)
+
+proxmat <- dist(shan_ict, method = 'euclidean')
+
+hclust_ward <- hclust(proxmat, method = 'ward.D')
+```
+
+ClustGeo package has a `hclustgeo()` function. We use this function to perform ward-like hierarchical clustering. This is same as hclust() function and selecting method as ward. This is another option to use compared to hclust. Either which, there is no spatial constrained applied here.
+
+Since this is a non-spatially constrained hierarchical cluster, we only need the dissimilarity, matrix. The matrix needs to be a dist() object class.
+
+```{r}
+nongeo_cluster <- hclustgeo(proxmat)
+plot(nongeo_cluster, cex = 0.5)
+
+#draw colour boxes for each cluster
+rect.hclust(nongeo_cluster,
+           k = 6,
+           border = 1:6)
+```
+
+### 1.1 Choropleth Mapping of Clusters
+
+We can plot the clusters onto the map. We convert the clusters values into a factor/category. nongeo_cluster builds a tree. We use cutree() to cut the tree into k number of groups then convert into factor
+
+```{r}
+groups<-as.factor(cutree(nongeo_cluster, k= 6))
+
+#add to shan_sf data table
+shan_sf_nego_cluster <- cbind(shan_sf, as.matrix(groups)) %>%
+  rename(`CLUSTER` = `as.matrix.groups.`)
+```
+
+```{r}
+qtm(shan_sf_nego_cluster, "CLUSTER")
+```
+
+Without considering the effects of geospatial effect, we can see the clustering is a fragmented.
+
+### 1.2 Spatially Constrained Hierarchical Clustering with Clustgeo
+
+We need a spatial distance matrix. This can be computed using st_distance() of sf package. We use as.dist() to convert dist into a matrix.
+
+```{r}
+dist <- st_distance(shan_sf, shan_sf)
+distmat <- as.dist(dist)
+```
+
+We can tune the weight of spatial constraint effect on the hierarchical clustering using the choicealpha(). To visualise the impact of the choice alpha, we can plot a graph and select a choice alpha that is the best trade off between cluster attribute effect and geospatial attribute effect.
+
+**0 \<= Choice alpha \<= 1**
+
+Choice alpha of 0 means we consider the least geospatial attribute effect.
+
+Choice alpha of 1 means we consider maximum effect of geospatial attribute effect.
+
+First graph is Q and second graph is Qnorm. Q norm is normalised version of Q and used when cluster attribute is skewed.
+
+```{r}
+cr <- choicealpha(proxmat, distmat, range.alpha = seq(0, 1, 0.1), K=6, graph = TRUE)
+```
+
+From above, we will select choice alpha 0.3. This selects 70% impact of spatial effect and 70% of clustering attribute effect.
+
+We build the clustG model with alpha = 0.3.
+
+```{r}
+clustG <- hclustgeo(proxmat, distmat, alpha = 0.3)
+```
+
+```{r}
+groups <- as.factor(cutree(clustG, k=6))
+```
+
+```{r}
+#add groups to sf data table
+shan_sf_Gcluster <- cbind(shan_sf, as.matrix(groups)) %>%
+  rename(`CLUSTER` = `as.matrix.groups.`)
+```
+
+```{r}
+qtm(shan_sf_Gcluster, "CLUSTER")
+```
+
+With spatial effect taken into account, the clustering is more cohesive.
