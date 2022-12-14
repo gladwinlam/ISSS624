@@ -15,7 +15,7 @@ The R packages needed for this exercise are as follows:
 
     -   [**GWmodel**](https://cran.r-project.org/web/packages/GWmodel/)
 
--   R package for multivariate data visualisation and analysis
+-   R package for multivariate data visualization and analysis
 
     -   [**corrplot**](https://cran.r-project.org/web/packages/corrplot/vignettes/corrplot-intro.html)
 

@@ -1,0 +1,1323 @@
+---
+title: "Takehome Exercise 2"
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+# Overview
+
+Water is a precious resource. In Nigeria there are water points where villagers rely for their water consumption. However the access to water is not equal. Some parts of Nigeria have better access to water than other parts. In planning for water point management, it is important to understand which areas have similar water access situation and which areas are different so the right solution can be prioritized and prescribed.
+
+# Objective
+
+In Geospatial analytics, there is a concept called regionalisation. It is a clustering technique where observations with similar statistical attributes and geospatial attributes are grouped together. In this exercise, we aim to group Nigerian villages that are similar together using their geospatial properties as well as the below metrics:
+
+-   Total number of functional water points
+
+-   Total number of nonfunctional water points
+
+-   Percentage of functional water points
+
+-   Percentage of non-functional water points
+
+-   Percentage of main water point technology (i.e. Hand Pump)
+
+-   Percentage of non-high vs high usage capacity (i.e. \< 1000, \>=1000)
+
+-   Percentage of rural water points
+
+# **Dataset**
+
+Data will be from 2 sources. One dataset will provide information on water points. This data is aspatial. The other provides information on Local Government Area boundary of Nigeria. This data is geospatial.
+
+### **Aspatial data**
+
+We will be using the WPdx+ dataset from [WPdx Global Data Repositories](https://www.waterpointdata.org/access-data/). Data downloaded is in CSV format.
+
+### **Geospatial data**
+
+We will be using the Nigeria Level-2 Administrative Boundary polygon features GIS data. Data is downloaded from [geoBoundaries](https://www.geoboundaries.org/) and is in shapefile format.
+
+------------------------------------------------------------------------
+
+# 1.Data Preparation
+
+We load the packages needed and install them if needed. Packages needed are:
+
+-   **sf, spdep, tmap, tidyverse, funModeling, shinyjs, cluster, factoextra, heatmaply, ClustGeo, GGally**
+
+First, we use pacman to load in the library we need.
+
+```{r}
+pacman::p_load(sf, spdep, tmap, tidyverse, funModeling, shinyjs, cluster, factoextra, heatmaply, ClustGeo, GGally,ggpubr, corrplot)
+```
+
+## 1.1 Importing Aspatial Data
+
+We use ***read_csv()*** of of readr package to read in the waterpoint CSV file. The file contains countries beyond Nigeria. As we are focusing our analysis on Nigeria, we use ***filter()*** to filter our records that are from Nigeria and save it into a tibble dataframe.
+
+```{r}
+wp_nga <- read_csv("geodata/WPdx.csv") %>%
+  filter(`#clean_country_name` == "Nigeria")
+```
+
+We can look at the columns and its attributes using ***glimpse()***. There are 95,008 rows by 70 columns.
+
+```{r}
+glimpse(wp_nga)
+```
+
+We check if there are missing values using ***is.na().*** It will return number of missing values and sum() will sum up the number of missing values.
+
+```{r}
+sum(is.na(wp_nga))
+```
+
+As we can some of the columns contain NA values. There are 1520020 NAs in total. We will need to handle this later.
+
+We also check if the geospatial attribute is in the right format. From ***glimpse()*** above, we can see "New Georeferenced Column" column is in \<CHR\> character format. This is aspatial format. We will need to clean this up.
+
+```{r}
+head(wp_nga$`New Georeferenced Column`,2)
+```
+
+The geometry column in character format is known as Well Known Text (wkt) format. We will convert this aspatial format into sf data frame using ***st_as_sfc()***. In SF library, we have 3 object types: sg object, sfc object and sf object.
+
+-   sg object has the lowest information richness. It only contains coordinates information
+
+-   sfc objects includes EPSG code information
+
+-   sf object is a sfc object with additional data columns.
+
+In below code chunk, we turn New Georeferenced Column into a sfc object and append it as a new column into wp_nga tibble data table.
+
+```{r}
+wp_nga$Geometry <- st_as_sfc(wp_nga$`New Georeferenced Column`)
+head(wp_nga$Geometry)
+```
+
+Once new column has been added, we convert the wp_nga tibble data frame into sf data table using ***st_sf()*** and name the data table wp_sf.
+
+```{r}
+wp_sf <- st_sf(wp_nga, crs=4326)
+wp_sf
+```
+
+## 1.2 Importing Geospatial Data
+
+We import the Local Government Area data using ***st_read()***. The towns in Nigeria are divided into multiple local government areas. Each government area is a polygon by itself. We import it and name the data as nga with EPSG 4326.
+
+```{r}
+nga <- st_read(dsn = "geodata",
+               layer = "geoBoundaries-NGA-ADM2",
+               crs = 4326) %>%
+  select(shapeName)
+```
+
+There might be duplicates in the shapeNames. We run a check to see using ***duplicated()*** if base R.
+
+```{r}
+nga$shapeName[duplicated(nga$shapeName)]
+```
+
+There are some duplicated shapeNames. We find out the indexes in the list of duplicates and return the shapeNames.
+
+```{r}
+duplicated_name <- nga$shapeName[duplicated(nga$shapeName)]
+dup_idx <- which(nga$shapeName %in% duplicated_name)
+nga[dup_idx,]
+```
+
+Index 94, 95, 304, 305, 355, 356, 519, 520, 546 and 547 have duplicated shapeNames. We save all the indexes into a vector called **dup_idx**. Next we need to identify these duplicated boundary names. We plot the polygons in an interactive map using openstreet maps layer and rely on its labels to identify the duplicated shapeNames and make comparison to Google Maps.
+
+```{r}
+tmap_mode('view')
+  tm_shape(nga[dup_idx,]) +
+  #tm_shape(nga[519,])+
+  tm_polygons()
+```
+
+Based on a visual analysis, the correct ShapeName should follow the table below. We overwrite the ShapeName of the indexes according to the table below.
+
+| Row | Renamed ShapeName |
+|-----|-------------------|
+| 94  | Bassa-kogi        |
+| 95  | Bassa-plateau     |
+| 304 | Ifelodun-kwara    |
+| 305 | Ifelodun-Osun     |
+| 355 | Irepodun-Kwara    |
+| 356 | Irepodun-Osun     |
+| 519 | Kano              |
+| 520 | Nassarawa         |
+| 546 | Obi-Benue         |
+| 547 | Obi-Nasarawa      |
+| 693 | Surulere-lagos    |
+| 694 | Surulere-Oyo      |
+
+[Source](https://jordan-isss624-geospatial.netlify.app/posts/geo/geospatial_exercise/#data-wrangling): (Ong, 2022)
+
+The code chunk below is used to rename the duplciated shapeNames.
+
+```{r}
+nga$shapeName[dup_idx] <- c("Bassa-kogi", "Bassa-plateau", "Ifelodun-kwara", "Ifelodun-Osun", "Irepodun-Kwara", "Irepodun-Osun", "Kano", "Nassarawa", "Obi-Benue", "Obi-Nasarawa", "Surulere-lagos", "Surulere-Oyo")
+```
+
+We check if there are any duplicated shapeNames once again after the overwrite step above. If there are, return the index.
+
+```{r}
+which(nga$shapeName %in% nga$shapeName[duplicated(nga$shapeName)])
+```
+
+Great! There are no more duplicated shapeNames. We are now ready to combine the aspatial and geospatial data together.
+
+## 1.3 Table Join
+
+We are interested to find out the statistical attributes of each polygon. Ideally we need a sf data table where it has the geometry information and the statisical attributes for each geometry. We can map the attributes of the wp_nga table into nga using ***st_join()***. Data is joined in the same method as ***st_intersects()***.
+
+```{r}
+wp_sf_2 <- st_join(wp_sf, nga)
+wp_sf_2
+```
+
+After the join, there are 95,008 rows and 72 columns.
+
+## 1.4 Data Wrangling
+
+```{r}
+colnames(wp_sf_2)
+```
+
+## 1.5 Deriving new metrics
+
+In order to regionalise the data by the measures defined, we need to create new metrics. The process will be to first check if there are empty data points for these related data points. If there are, we fill the blanks with "Unknown". Then we compute these metrics:
+
+-   Total number of functional water points
+
+    -   Count of functional water points
+
+-   Total number of non-functional water points
+
+    -   Count of non-functional water points
+
+-   Percentage of functional water points
+
+    -   Count of functional water points/ total count of water points
+
+-   Percentage of non-functional water points
+
+    -   Count of non-functional water points/ total count of water points
+
+-   Percentage of main water point technology (i.e. Hand Pump)
+
+    -   Count of water point technology/ total count of water points
+
+-   Percentage of non-high vs high usage capacity (i.e. \< 1000, \>=1000)
+
+    -   Count of water points with high usage capacity/ total count of water points
+
+    -   Count of water points with non-high usage capacity/ total count of water points
+
+-   Percentage of rural water points
+
+    -   Count of rural water points / total count of water points
+
+    -   Count of rural urban points / total count of water points
+
+#### 1.51 Water point Functionality
+
+The below code chunk is used to check the frequency distribution of the water point functionality.
+
+```{r}
+freq(wp_sf_2$`#status_clean`)
+```
+
+From above we can see there are many NAs for status clean column. We will remove the NAs
+
+```{r}
+wp_sf_2 <-wp_sf_2 %>%
+  mutate(`#status_clean` = replace_na(`#status_clean`, "Unknown"))
+
+freq(wp_sf_2$`#status_clean`)
+```
+
+We create new variables using the filter() and then do a point in polygon count, and save the data in nga_wp data frame which originates from nga data table.
+
+```{r}
+# Functional Waterpoint
+wpt_functional <- wp_sf_2 %>%
+  filter(`#status_clean` %in%
+           c("Functional", 
+             "Functional but not in use",
+             "Functional but needs repair"))
+
+#Non Functional Waterpoint
+wpt_nonfunctional <- wp_sf_2 %>%
+  filter(`#status_clean` %in%
+           c("Abandoned/Decommissioned", 
+             "Abandoned",
+             "Non-Functional",
+             "Non functional due to dry season",
+             "Non-Functional due to dry season"))
+
+#Unknown Waterpoint
+wpt_unknown <- wp_sf_2 %>%
+  filter(`#status_clean` == "Unknown")
+
+#Count of waterpoint functioning/ not functioning
+nga_wp <- nga %>% 
+  mutate(`total wpt` = lengths(
+    st_intersects(nga, wp_sf_2))) %>%
+  mutate(`wpt functional` = lengths(
+    st_intersects(nga, wpt_functional))) %>%
+  mutate(`wpt non-functional` = lengths(
+    st_intersects(nga, wpt_nonfunctional))) %>%
+  mutate(`wpt unknown` = lengths(
+    st_intersects(nga, wpt_unknown)))
+```
+
+We have created 4 columns - ***Total wpt,*** ***wpt functional***, ***wpt non-functional,*** ***wpt unknown***.
+
+#### 1.52 Water point technology
+
+We check the categories of water point technology using the ***freq()*** function.
+
+```{r}
+#Check out unique categories
+freq(wp_sf_2$`#water_tech_category`)
+```
+
+There are NAs. We will need to remove them before computing the metrics.
+
+```{r}
+wp_sf_2 <-wp_sf_2 %>%
+  mutate(`#water_tech_category` = replace_na(`#water_tech_category`, "Unknown"))
+
+freq(wp_sf_2$`#water_tech_category`)
+```
+
+We create new variables using the ***filter()*** and then do a point in polygon count and save the data in nga_wp data frame. Note that there is only 1 rope and bucket hand pump count.
+
+```{r}
+#Declaring categories
+tpstand <- wp_sf_2 %>%
+  filter(`#water_tech_category` == "Tapstand")
+
+m_pump <- wp_sf_2 %>%
+  filter(`#water_tech_category` == "Mechanized Pump")
+
+h_pump <- wp_sf_2 %>%
+  filter(`#water_tech_category` == "Hand Pump")
+
+unknown_pump <- wp_sf_2 %>%
+  filter(`#water_tech_category` == "Unknown")
+
+rpe_buc_pump <- wp_sf_2 %>%
+  filter(`#water_tech_category` == "Rope and Bucket")
+
+#Count of waterpoint technology categories
+nga_wp <- nga_wp %>% 
+  mutate(`wpt_tpstand` = lengths(
+    st_intersects(nga, tpstand))) %>%
+  mutate(`wpt_m_pump` = lengths(
+    st_intersects(nga, m_pump))) %>%
+  mutate(`wpt_h_pump` = lengths(
+    st_intersects(nga, h_pump))) %>%
+  mutate(`wpt_unknown` = lengths(
+    st_intersects(nga, unknown_pump))) %>%
+  mutate(`wpt_rpe_buc_pump` = lengths(
+    st_intersects(nga, rpe_buc_pump)
+  ))
+```
+
+We created 5 columns : ***wpt_tpstand***, ***wpt_m\_pump***, ***wpt_h\_pump***, ***wpt_unknown***, ***wpt_pe_buc_pump***.
+
+#### 1.53 Water point usage capacity
+
+We check the usages of water point technology using the ***freq()*** function.
+
+```{r}
+freq(data = wp_sf_2,
+     input = "usage_capacity")
+```
+
+There are 4 categories. We bin the capacity into 2 categories - Waterpoint less than 1000 and waterpoint more than 1000. The former implies water usage capacity is low while latter is high. We create new variables using the ***filter()*** and then do a point in polygon count and save the data in nga_wp data frame.
+
+```{r}
+wpt_l_1000 <- wp_sf_2 %>%
+  filter(usage_capacity %in% c(50,250,300))
+
+wpt_m_1000 <- wp_sf_2%>%
+  filter(usage_capacity %in% c(1000))
+
+#Count of capacity more than and less than 1000
+nga_wp <- nga_wp %>% 
+  mutate(`wtp_m1000` = lengths(
+    st_intersects(nga, wpt_m_1000))) %>%
+  mutate(`wtp_l1000` = lengths(
+    st_intersects(nga, wpt_l_1000)))
+```
+
+We added 2 columns - ***wtp_m1000*** and ***wtp_l1000***.
+
+#### 1.54 Water point location
+
+The water point has a metric that "is_urban" that classifies whether it is in rural area or non rural area. There are a lot more water point in non urban areas than rural areas. For simplicity, I define non urban as rural.
+
+```{r}
+table(wp_sf_2$is_urban)
+```
+
+We create new variables using the ***filter()*** and then do a point in polygon count and save the data in nga_wp data frame.
+
+```{r}
+wpt_rural <- wp_sf %>%
+  filter(is_urban == FALSE)
+
+wpt_urban <- wp_sf %>%
+  filter(is_urban == TRUE)
+
+#Count of urban water point vs non urban water point
+nga_wp <- nga_wp %>% 
+  mutate(`rural_count` = lengths(
+    st_intersects(nga, wpt_rural))) %>%
+  mutate(`urban_count` = lengths(
+    st_intersects(nga, wpt_urban)))
+```
+
+## 1.6 Deriving percentages of each metric
+
+We cannot use the absolute count in our analysis as some areas might have more water point than others and hence the clustering algorithm might be biased towards polygons with greater counts of water points. We compute the percentage value instead of count as seen below:
+
+```{r}
+nga_wp <- nga_wp %>%
+  mutate(`pct_functional` = `wpt functional`/`total wpt`) %>%
+  mutate(`pct_non-functional` = `wpt non-functional`/`total wpt`) %>%
+  mutate(`pct_tpstand` = `wpt_tpstand`/`total wpt`) %>%
+  mutate(`pct_mpump` = `wpt_m_pump`/`total wpt`) %>%
+  mutate(`pct_hpump` = `wpt_h_pump`/`total wpt`) %>%
+  mutate(`pct_unknown` = `wpt_unknown`/`total wpt`) %>%
+  mutate(`pct_rbpump` = `wpt_rpe_buc_pump`/`total wpt`) %>%
+  mutate(`pct_wptm1000` = `wtp_m1000`/`total wpt`) %>%
+  mutate(`pct_wptl1000` = `wtp_l1000`/`total wpt`) %>%
+  mutate(`pct_rural` = `rural_count`/`total wpt`) %>%
+  mutate(`pct_urban` = `urban_count`/`total wpt`)
+```
+
+We save the data table in a smaller file for easy access
+
+```{r}
+write_rds(nga_wp, "geodata/nga_wp.rds")
+nga_wp <-read_rds("geodata/nga_wp.rds")
+nga_wp
+```
+
+## 2. Exploratory Data Analysis
+
+### 2.1 Histogram of distribution
+
+We use the ***summary()*** to obtain summary statistics.
+
+```{r}
+summary(nga_wp[,5:length(nga_wp)])
+```
+
+As seen from above, there are some NAs. We dive deeper into it to identify these NAs using is.na() and which() to identify the indexes. There are 13 NAs.
+
+```{r}
+which(is.na(nga_wp$ pct_functional))
+which(is.na(nga_wp$pct_wptm1000))
+```
+
+```{r}
+table(nga_wp$`total wpt`)
+```
+
+The reason of the NAs is because there are some polygons that have no water point and hence it is a result of a 0 division. For metrics that are NA, we replace them with 0 using the below code chunk.
+
+```{r}
+nga_wp$pct_functional[is.nan(nga_wp$pct_functional)] <- 0
+nga_wp$`pct_non-functional`[is.nan(nga_wp$`pct_non-functional`)] <- 0
+nga_wp$pct_tpstand[is.nan(nga_wp$pct_tpstand)] <- 0
+nga_wp$pct_mpump[is.nan(nga_wp$pct_mpump)] <- 0
+nga_wp$pct_hpump[is.nan(nga_wp$pct_hpump)] <- 0
+nga_wp$pct_unknown[is.nan(nga_wp$pct_unknown)] <- 0
+nga_wp$pct_rbpump[is.nan(nga_wp$pct_rbpump)] <- 0
+nga_wp$pct_wptm1000[is.nan(nga_wp$pct_wptm1000)] <- 0
+nga_wp$pct_wptl1000[is.nan(nga_wp$pct_wptl1000)] <- 0
+nga_wp$pct_rural[is.nan(nga_wp$pct_rural)] <- 0
+nga_wp$pct_urban[is.nan(nga_wp$pct_urban)] <- 0
+
+summary(nga_wp[,5:length(nga_wp)])
+```
+
+Finally, all the NaNs are removed! Next we plot the distributions of the different metrics.
+
+[**Histogram of Functionality of Water points**]{.underline}
+
+```{r}
+# pct_functional
+# pct_non-functional
+# pct_tpstand
+# pct_mpump
+# pct_hpump
+# pct_unknown
+# pct_rbpump
+# pct_wptm1000
+# pct_wptl1000
+# pct_rural
+# pct_urban
+
+
+p1 <- ggplot(data=nga_wp,
+             aes(x= pct_functional)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+p2 <- ggplot(data=nga_wp,
+             aes(x= `pct_non-functional`)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+p3 <- ggplot(data=nga_wp,
+             aes(x= `pct_unknown`)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+ggarrange(p1,p2,p3,
+          ncol = 2, 
+          nrow = 2)
+```
+
+As we can see, all 3 are right skewed. This means most metrics have more lower percentages than higher percentages. This is more true for Local government areas with non-functioning and unknown functioning proportion fo water points.
+
+[**Histogram of Water point Technology**]{.underline}
+
+```{r}
+p4 <- ggplot(data=nga_wp,
+             aes(x= pct_tpstand)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+p5 <- ggplot(data=nga_wp,
+             aes(x= pct_mpump)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+p6 <- ggplot(data=nga_wp,
+             aes(x= pct_hpump)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+p7 <- ggplot(data=nga_wp,
+             aes(x= pct_unknown)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+p8 <- ggplot(data=nga_wp,
+             aes(x= pct_rbpump)) +
+  geom_histogram(bins=3,
+                 color="black",
+                 fill="grey")
+
+ggarrange(p4,p5,p6,p7,p8,
+          ncol = 2, 
+          nrow = 3)
+```
+
+Percentage of tapstand, unknown and rope and bucket pump types are right skewed. Rope and bucket type only has a count of one hence has the following histogram shape.
+
+[**Histogram of Waterpoint Usage (High vs Low)**]{.underline}
+
+```{r}
+p9 <- ggplot(data=nga_wp,
+             aes(x= pct_wptm1000)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="blue")
+
+p10 <- ggplot(data=nga_wp,
+             aes(x= pct_wptl1000)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="blue")
+
+ggarrange(p9,p10)
+```
+
+As expected, the 2 histograms are inverse of each other as they are the complement of each other.
+
+[**Histogram of Waterpoint Rural vs Urban Areas**]{.underline}
+
+```{r}
+p11 <- ggplot(data=nga_wp,
+             aes(x= pct_rural)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="red")
+
+p12 <- ggplot(data=nga_wp,
+             aes(x= pct_urban)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="red")
+ggarrange(p11,p12)
+```
+
+As expected, the 2 histograms are inverse of each other as they are the complement of each other.
+
+### 2.2 Choropleth Mapping
+
+We can visualise the metrics in a choropleth mapping. We select "jenks" for the classification option. The jenk natural breaks style below classified into intervals by identifying groups of similar values and maximizes the differences.
+
+[**Functionality of Waterpoint Usage**]{.underline}
+
+```{r}
+tmap_mode('plot')
+
+func.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_functional",
+          style = "jenks",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Functional water points\nby LGA level (Jenks classification)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+nonfunc.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_non-functional",
+          style = "jenks",
+          palette = "YlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Non-Functional water points\nby LGA level (Jenks classification)",
+            main.title.size = 0.7,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+tmap_arrange(func.map, nonfunc.map,
+             asp=NA, ncol=2)
+```
+
+There are more functioning water point up north compared to south part of Nigeria. There seems to be some spatial autocorrelation in where the functioning and non-functioning water points are located.
+
+[**Water point Technology**]{.underline}
+
+```{r}
+tmap_mode('plot')
+tpstand.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_tpstand",
+          style = "jenks",
+          palette = "Purples",
+          n=3,
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Tapstand type\nby LGA (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+mpump.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_mpump",
+          style = "jenks",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Mechanised Pump type\nby LGA (Jenks)",
+            main.title.size = 0.7,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+hpump.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_hpump",
+          style = "jenks",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Hand Pump type\nby LGA (Jenks)",
+            main.title.size = 0.7,
+            legend.outside = TRUE)+
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+unknown.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_unknown",
+          style = "jenks",
+          palette = "Purples",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Unknown type\nby LGA (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+rbpump.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_rbpump",
+          style = "jenks",
+          palette = "Purples",
+          n=2,
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Rope & Bucket type\nby LGA (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+
+tmap_arrange(hpump.map, mpump.map,
+             asp=NA, ncol=2)
+```
+
+Handpumps are generally distributed around Nigeria except for the North eastern tip and South western tip with many located in the Northern part. Whereas in North eastern part and South western part there are more mechanized pump type.
+
+```{r}
+tmap_arrange(tpstand.map,unknown.map, rbpump.map,
+             asp=NA, ncol=2)
+```
+
+South eastern and western areas of Nigeria has many unknown types of water point. Perhaps more data collection and cleaning effort should be done here. For rope and and bucket pump type, the distribution is as per expected as there is only a count of 1. For tapstand water point, it appears as a cluster near the South western tip. There seems to be spatial autocorrelation.
+
+[**Usage Capacity**]{.underline}
+
+```{r}
+high.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_wptm1000",
+          style = "jenks",
+          palette = "Blues",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of High water usage\nby LGA level (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+low.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_wptl1000",
+          style = "jenks",
+          palette = "Blues",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Low water usage\nby LGA level (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+tmap_arrange(high.map, low.map,
+             asp=NA, ncol=2)
+```
+
+The South Western part of Nigeria seems to have higher water usage capacity compared to other parts of Nigeria. The Northern part of Nigeria seem to have lower water usage capacity.
+
+[**Water point in Rural Area vs Non Rural**]{.underline}
+
+```{r}
+rural.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_rural",
+          style = "jenks",
+          palette = "Blues",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Rural\nby LGA level (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+urban.map <- tm_shape(nga_wp) + 
+  tm_fill(col = "pct_urban",
+          style = "jenks",
+          palette = "Blues",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Distribution of Urban\nby LGA level (Jenks)",main.title.size = 0.7,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+tmap_arrange(rural.map, urban.map,
+             asp=NA, ncol=2)
+
+```
+
+From above, most of the water points are in rural area.
+
+### 2.3 Correlation Analysis
+
+For cluster analysis, the variables cannot be highly correlated. We check if variables are highly correlated using a correlation table.
+
+For our cluster analysis, we will only look at the percentage values and non absolute values. Hence we slice the data frame. We will also need to convert the sf dataframe into tibble format in order for the ***cor()*** function to work.
+
+```{r}
+cor(as_tibble(nga_wp)[,16:length(nga_wp)])
+```
+
+We visualise it in a plot for easier viewing.
+
+```{r}
+clustvarcor <- cor(as_tibble(nga_wp)[,16:length(nga_wp)])
+corrplot.mixed(clustvarcor,
+         lower = "ellipse",
+         addCoef.col = 1,
+         number.cex = 0.5,
+               upper = "number",
+               tl.pos = "lt",
+               diag = "l",
+               tl.col = "black")
+```
+
+For variables that has a correlation efficient of higher than 0.80, we remove them as a cluster variable.
+
+```{r}
+abs(cor(as_tibble(nga_wp)[,16:length(nga_wp)])) > 0.8
+```
+
+We can see:
+
+-   **pct_wptm1000** is highly correlated to **pct_mpump** and **pct_wptl1000**
+
+    -   **pct_wptm1000** and **pct_mpump** has a coefficient of 1. This means likely only mechanised pump is able to output a capacity more than 1000.
+
+-   **pct_wptl1000** is highly correlated to **pct_mpump**, **pct_hpump** and **pct_wptm1000**
+
+-   **pct_rura**l is highly correlated to **pct_urban**
+
+From above, if we remove **pct_wptl1000** and **pct_wptm1000**, we lose information on usage capacity. If we keep **pct_wptm1000**, it will be highly correlated to **pct_mpump** with a correlation coefficient of 1. If we keep **pct_wptl1000**, it will be highly correlated to **pct_mpump**, **pct_hpump**. However it will be better to remove **pct_wptm1000** as correlation is too highly.
+
+In conclusion, we will remove **pct_wptm1000** and **pct_urban** from our analysis.
+
+```{r}
+clustvar <- colnames(nga_wp[,16:length(nga_wp)])
+clustvar <- clustvar[-c(8, 11, 12)]
+clustvar
+```
+
+## 3. Hierarchy Cluster Analysis
+
+We perform a hierarchical clustering without geographical constraint. Clustering will be performed based on the variables without accounting for the observations' position geographically.
+
+We prepare the dataframe and drop the geometry column using ***st_set_geometry(NULL)***.
+
+```{r}
+clust_var_df <- nga_wp %>%
+  st_set_geometry(NULL) %>% 
+  select("shapeName", clustvar)
+
+head(clust_var_df)
+```
+
+We will use the shapeName as the index of the dataframe and drop shapeName column using the below code chunk.
+
+```{r}
+row.names(clust_var_df) <- clust_var_df$"shapeName"
+clust_var_df <- clust_var_df[-c(1)]
+head(clust_var_df,10)
+```
+
+Next, we standardise the percentage columns. As seen previously in histogram, many of these columns are skewed. Standardisation can help to make them less skewed. This is important as clustering algorithms are sensitive to skewness of data. We create clust_var_df.z variable.
+
+```{r}
+clust_var_df.z <- scale(clust_var_df)
+describe(clust_var_df.z)
+```
+
+```{r}
+clustdf <- as.data.frame(clust_var_df.z)
+
+a1 <- ggplot(data=clustdf,
+             aes(x= `pct_functional`)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+a2 <- ggplot(data=clustdf,
+             aes(x= `pct_non-functional`)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+a3 <- ggplot(data=clustdf,
+             aes(x= `pct_unknown`)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="white")
+
+ggarrange(a1,a2,a3,
+          ncol = 2, 
+          nrow = 2)
+```
+
+```{r}
+a4 <- ggplot(data=clustdf,
+             aes(x= pct_tpstand)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+a5 <- ggplot(data=clustdf,
+             aes(x= pct_mpump)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+a6 <- ggplot(data=clustdf,
+             aes(x= pct_hpump)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+a7 <- ggplot(data=clustdf,
+             aes(x= pct_hpump)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="grey")
+
+a8 <- ggplot(data=clustdf,
+             aes(x= pct_rbpump)) +
+  geom_histogram(bins=3,
+                 color="black",
+                 fill="grey")
+
+ggarrange(a4,a5,a6,a7,a8,
+          ncol = 2, 
+          nrow = 3)
+```
+
+```{r}
+a10 <- ggplot(data=clustdf,
+             aes(x= pct_wptl1000)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="blue")
+
+ggarrange(p10,a10)
+```
+
+```{r}
+a11 <- ggplot(data=clustdf,
+             aes(x= pct_rural)) +
+  geom_histogram(bins=20,
+                 color="black",
+                 fill="red")
+
+ggarrange(p11,a11)
+```
+
+All the data is less skewed after standardization.
+
+### 3.1 Computing Proximity Matrix
+
+Next we compute the proximity matrix using the euclidean distance method. This is a matrix that stores the distance between the data attributes in space. It is multi-dimension and measures similarity or dissimilarities.
+
+```{r}
+proxmat <- dist(clust_var_df.z, method = 'euclidean')
+```
+
+### 3.2 Performing the Clustering
+
+They are several clustering method to calculate the linkage which is the pairwise dissimilarity between local government areas attributes. To determine the best method, we can try them out using the ***map_dbl()*** function and a vector with the names of the vector defined.
+
+```{r}
+mthd <- c( "average", "single", "complete", "ward")
+names(mthd) <- c( "average", "single", "complete", "ward")
+
+tryfunc <- function(x) {
+  agnes(clust_var_df.z, method = x)$ac
+}
+
+map_dbl(mthd, tryfunc)
+```
+
+Since ward D has the highest agglomerative coefficient, it suggests there is strongest clustering structure. We complete the analysis using the ward D method. Ward D minimises the total within-cluster variance and combines with another cluster with the least between-cluster distance at each step in an agglomerative bottom up manner until all nodes are one big single cluster.
+
+To perform the hierachical clustering, we use the ***hclust()***, input the proximity matrix and define to use Ward D hierachical clustering.
+
+```{r}
+hc_wd <- hclust(proxmat, method = 'ward.D')
+```
+
+We will visualise the cluster using the dendrogram after determining optimal number of clusters.
+
+### 3.3 Determining the optimal number of clusters
+
+While hiercachical clustering can help to perform the cluster, it does not select the optimal number of clusters. We can use the gap statistics to determine optimal number of clusters. The optimal number of cluster is the number that maximizes the gap statistics. The greatest gap statistics will create a clustering structure that is furthest as compared to uniform random distribution of points. We ***set.seed(1)*** so that the analysis can be repeatable. We also limit k to 10 such that it will not create too many clusters. We set B=50 such that 50 Monte Carlo bootstraps sample are run. This is the best trade off between efficiency and performance.
+
+```{r}
+set.seed(1)
+
+gap_stat <- clusGap(clust_var_df.z, 
+                    FUN = hcut, 
+                    nstart = 25, 
+                    K.max = 10, 
+                    B = 50)
+
+print(gap_stat)
+```
+
+```{r}
+fviz_gap_stat(gap_stat)
+```
+
+Ideally, we should be choosing the number of clusters with the highest gap statistics. However in this scenario, the gap statistics keeps increasing, even past 10. This will mean there could be 20 or even 30 optimal clusters. This might be too fragmented.
+
+As such, I will apply the Tibshirani 1-standard-error method which suggest to choose the optimal number of cluster where the rate of change of gap statistics start to slow down.
+
+![](images/Screenshot%202022-12-11%20at%2010.18.52%20PM.png){fig-align="center" width="340"}
+
+In this case, it will be 2 optimal clusters. However, 2 is too few. I will select the next best, which is 5 clusters. We define 5 clusters and plot a dendrogram to represent the clusters.
+
+```{r}
+plot(hc_wd, cex = 0.1)
+rect.hclust(hc_wd, 
+            k = 5, 
+            border = 2:6)
+```
+
+From above, there are too many towns. As such it is difficult to view the towns using the dendrogram. We draw 5 rectangular boxes to indicate the 5 clusters using rect.hclust(). In a dendrogram, the 2 nodes that combines through a edge means there are the most similar. The height of the edge between 2 nodes also represents the similarities of the clusters.
+
+We will build an interactive map below to help visualize and analyse the clusters
+
+### 3.4 Hierarchical Clustering Analysis
+
+```{r}
+clust_var_df_mat <- data.matrix(clust_var_df)
+
+heatmaply(normalize(clust_var_df_mat),
+          Colv=NA,
+          dist_method = "euclidean",
+          hclust_method = "ward.D",
+          seriate = "OLO",
+          colors = Blues,
+          k_row = 5,
+          margins = c(NA,100,50,NA),
+          fontsize_row = 4,
+          fontsize_col = 3,
+          main="Segmentation of Nigeria by\nWater Point Characteristics",
+          cellnote_size = 6,
+          xlab = "Water Point Characteristics",
+          ylab = "Nigeria Towns"
+          )
+```
+
+[**Purple Cluster:**]{.underline}
+
+Purple cluster contain areas that generally have low to moderate percentage of water points in rural areas. It has relatively lower usage capacity. There are no rope and bucket pumps, high proportion of hand pumps, low proportion of mechanized pumps, no tap stand and the water points in this area highly functional.
+
+[**Blue Cluster:**]{.underline}
+
+Blue cluster contain areas that generally have high percentage of water points in rural areas. There is a mix between high and low water usage capacity. There are high proportion of unknown pump types, slightly higher proportion , low proportion of mechanized pumps, no tapstand and the water points in this area are evenly split between functional and non functional.
+
+[**Green Cluster:**]{.underline}
+
+Green cluster is the largest cluster. It contains areas that generally have high percentage of water points in rural areas. Majority of water points in these areas have low water usage capacity. There are high proportion of hand pump types, lower proportion of mechanized pumps. The only few tapstands in Nigeria belong in this area and the water points in this area are evenly split between functional and non functional.
+
+[**Brown Cluster:**]{.underline}
+
+Brown cluster is the second largest cluster. It contains areas with a mix between high and low percentage of water points in rural areas. Majority of water points in these areas have low water usage capacity. There are high proportion of mechincal pump types, lower proportion of hand pumps. The only few tapstands in Nigeria belong in this area and the water points in this area have more non-functional than functional.
+
+[**Pink Cluster:**]{.underline}
+
+Pink cluster contains areas with high percentage of water points in urban areas. Majority of water points in these areas have low water usage capacity. These areas mainly contain mechanised water pumps and are functional.
+
+### 3.5 Visualising clusters on choropleth map
+
+We can also view it on a map. We save the cluster group information to nga_wp sf data table using ***cbind()*** and use ***qtm()*** to generate the map.
+
+```{r}
+groups <- as.factor(cutree(hc_wd, k=5))
+```
+
+```{r}
+nga_wp_hclust <- cbind(nga_wp, as.matrix(groups)) %>%
+  rename(`CLUSTER`=`as.matrix.groups.`)
+```
+
+```{r}
+qtm(nga_wp_hclust, "CLUSTER") +
+  tm_layout(main.title = "Nigeria Segementation by Water Pump charcteristics\n (Hierachical Clustering)",main.title.size = 1,legend.outside = TRUE)
+```
+
+From above observation, the clusters are fragmented. For example, cluster 4 (red) appears in the south Nigeria but also in west Nigeria. However can we really ignore geographical impact on clustering?
+
+As seen earlier there seems to be spatial autocorrelation. If there is, we can introduce spatial constraint into our clustering. We can determine if there is spatial autocorrelation statically using our Moran I.
+
+### 3.6 Test for Global Spatial Autocorrelation with Moran I
+
+Since distance based matrix is needed, we need to convert the Geographic Coordinate System of nga_wp to a Projected Cordinate System. We choose crs = 26391 which is Minna/ Nigeria West Belt.
+
+```{r}
+nga_wp_p <- st_transform(nga_wp, crs = 26391)
+st_geometry(nga_wp_p)
+```
+
+As seen from above, it now has a Projected CRS with Minna/ Nigeria West Belt.
+
+We also need to compute the coordinates, which are the centroids of each polygon. We can do so using ***st_centroid()*** and combining them by column using ***cbind()*** to form a pair of coordinates.
+
+```{r}
+longitude <- map_dbl(nga_wp$geometry, ~st_centroid(.x)[[1]])
+latitude <- map_dbl(nga_wp$geometry, ~st_centroid(.x)[[2]])
+coords <- cbind(longitude, latitude)
+```
+
+We also need to create a neighbour list. We perform a adaptive distance approach using K Nearest Neighbour to creare the neighbour list using ***knn2nb()***. After that, we compute the spatial weights using ***nb2listw()*** and run Global Moran I test using ***moran.test()***.
+
+We perform attribute by attribute. We start with checking if there is spatial correlation in the proportion of mechanized pumps.
+
+```{r}
+set.seed(1)
+nga_wp_p_sp <- as_Spatial(nga_wp_p)
+
+#KNN based weight matrix, select 6 neighbours
+knn6 <- knn2nb(knearneigh(coords, k=6))
+
+#Spatial weights
+knn_lw <- nb2listw(knn6, style = 'W')
+
+#Moran test 
+moran.test(nga_wp_p_sp$wpt_m_pump, knn_lw)
+```
+
+Looking at percentage of mechanical pump, there is spatial autocorrelation since the p value \< 0.05. We can reject null hypothesis that the distribution of proportion of mechnaised pump is not random. We can perform another global Moran I test. This time it is on water usage capacity.
+
+```{r}
+#Moran test 
+moran.test(nga_wp_p_sp$wtp_l1000, knn_lw)
+```
+
+Global Moran test shows the same result where P value \< 0.05 for areas with lower water usage capacity. We can reject the null hypothesis that the
+
+Based on our result, we can conclude there is spatial autocorrelation. This means we cannot do a clustering analysis without accounting for the geographical impact. Thus we take our clustering analysis further with Spatially Constrained Hierarchical Clustering.
+
+## 4. Spatially Constrained Cluster Analysis
+
+We can use the SKATER method to perform spatially constrained clustering. SKATER is known as **S**patial 'K'luster Analysis by Tree Edge Removal. The SKATER method uses the Tree Edge Removal Assuncao algorithm.
+
+-   Step 1: It constructs a minimum spanning tree from adjacency graph. A minimum spanning tree is a tree that connects all nodes together with the least possible edge weight.
+
+    ![](images/paste-45C91013.png){width="314"}
+
+    At each step each node will look for the shortest path/ least weighted path to connect to the next node. Iteration ends when all the nodes are connected.
+
+-   Step 2: Next it prunes the tree edges to maximize internal homogeneity.
+
+![](images/paste-B325970A.png){width="336"}
+
+The algorithm will find the largest edge weight and prune the tree. Thus clusters are formed. Clusters formed will maximize homogeneity while also maximizing heterogeneity with other clusters.
+
+We use can use ***skater()*** to derive spatially constrained cluster. We will be using the neighbour list created above. Neighbour list created using K Nearest Method is preferred because it ensures every polygon will have a neighbor.
+
+```{r}
+knn6
+```
+
+We can visualize the neighbor list with the below code chunk.
+
+```{r}
+plot(nga_wp_p_sp, border=grey(.7))
+
+plot(knn6, 
+     coordinates(nga_wp_p_sp), 
+     col="Red",
+     pch = 19,
+     cex = 0.3,
+     add=TRUE)
+```
+
+### 4.1 Calculating Edge Cost
+
+The SKATER method requires edge to edge cost. We compute the edge to edge cost using ***nbcosts().*** We use the cost as weights of the matrix and ensure cost values are not row standardised.
+
+```{r}
+edge_cost <- nbcosts(knn6, clust_var_df)
+knn6nb <- nb2listw(knn6, edge_cost, style="B")
+summary(knn6nb)
+```
+
+### 4.2 Building Minimum Spanning Tree
+
+Next we can start building the minimum spanning tree. We build a minimum spanning tree using the ***mstree()*** function.
+
+```{r}
+knntree <- mstree(knn6nb)
+ 
+plot(nga_wp_p_sp, border=grey(.7))
+
+plot(knntree, 
+     coordinates(nga_wp_p_sp), 
+     col="Red",
+     pch = 19,
+     cex.circles = 0.3,
+     cex.lab = 0.3,
+     add=TRUE)
+```
+
+A minimum spanning tree is created connecting all the nodes together as seen above.
+
+### 4.3 Performing SKATER
+
+We use the ***skater()*** method and define the edges using the **knntree** minimum spanning tree variable created above. We use n = 4 cuts as 4 here means there will be a total of 5 cuts.
+
+```{r}
+clust5 <- skater(edges = knntree[,1:2], 
+                 data = clust_var_df, 
+                 method = "euclidean", 
+                 ncuts = 4)
+
+table(clust5$groups)
+```
+
+There are 422 LGAs in segment 1, 168 in segment 2, 120 in segment 3, 40 in segment 4 and 24 in segment 5.
+
+We can visualise it in the below map.
+
+```{r}
+plot(nga_wp_p_sp, border=grey(.7))
+plot(clust5, 
+     coordinates(nga_wp_p_sp), 
+     pch = 19,
+     cex.circles = 0.4,
+     cex.lab = 0.2,
+     groups.colors=c("red","green","blue", "pink","purple"),
+     add=TRUE)
+```
+
+### 4.4 Building choropleth map
+
+For more clarity, we can view the SKATER cluster in a choropleth map.
+
+```{r}
+clust5mat <- as.matrix(clust5$groups)
+
+nga_wp_cluster <- cbind(nga_wp, as.factor(clust5mat)) %>%
+  rename(`skater_clust`=`as.factor.clust5mat.`)
+```
+
+```{r}
+skater_clus_map <- tm_shape(nga_wp_cluster) + 
+  tm_fill(col = "skater_clust",
+          palette = "Spectral",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Nigeria Segementation by Water Pump\ncharcteristics (SKATER)",main.title.size = 1,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+
+skater_clus_map
+```
+
+With geographical constrain considered in the clustering, the segmentation are no longer fragmented. We can see areas near each other are cluster together.
+
+```{r}
+
+h_clus_map <- tm_shape(nga_wp_hclust) + 
+  tm_fill(col = "CLUSTER",
+          palette = "RdYlGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Nigeria Segementation by Water Pump\ncharcteristics (Hierarchical)",main.title.size = 1,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+tmap_arrange(skater_clus_map, h_clus_map)
+```
+
+We put them side by side for easier comparison.
+
+### 4.5 Tuning Impact of Geographical Constraint
+
+As we can see geographical constrain has an impact on the clustering but the impact of geographical constraint might be too strong. We can tune the impact of the geographical constraint, or optimize it. To do this we will need to use the clustgeo library as the ***choicealpha()*** function comes from there.
+
+```{r}
+nongeo_cluster <- hclustgeo(proxmat)
+groups <- as.factor(cutree(nongeo_cluster, k=5))
+```
+
+We create a distance matrix and put everything into choicealpa(). Choice alpha allows user to select the impact of spatial constraint when performing clustering. A choice alpha of 0 means we do not consider any spatial impact. If 1, it means we maxmise the impact of spatial constraint.
+
+```{r}
+dist <- st_distance(nga_wp_p, nga_wp_p)
+distmat <- as.dist(dist)
+
+cr <- choicealpha(proxmat, distmat, range.alpha = seq(0, 1, 0.1), K=5, graph = TRUE)
+```
+
+**D0**: Impact of clustering variable
+
+**D1**: Impact of spatial constraint
+
+From above we want to balance the impact of clustering variable and spatial constraint. Hence we will choose alpha of 0.12.
+
+```{r}
+clustG <- hclustgeo(proxmat, distmat, alpha = 0.12)
+groups <- as.factor(cutree(clustG, k=5))
+
+nga_wp_p_Gcluster <- cbind(nga_wp_p, as.matrix(groups)) %>%
+  rename(`CLUSTER` = `as.matrix.groups.`)
+
+skater_a_map <- tm_shape(nga_wp_p_Gcluster) + 
+  tm_fill(col = "CLUSTER",
+          palette = "PRGn",
+          legend.hist = TRUE) +
+  tm_layout(main.title = "Nigeria Segementation by Water Pump\ncharcteristics (SKATER with alpha)",main.title.size = 1,legend.outside = TRUE) +
+  tm_borders(lwd = 0.5,  alpha = 1, col = "black")
+
+skater_a_map
+```
+
+From above, we can see the spatial impact on clustering has been reduced. Some of the clusters are no longer as homogeneous as before. it now contains another segment. For example in Southern tip, we can see some of the purple segment contains some spill over from the white segment.
+
+We put SKATER clustering along with SKATER clustering with alpha.
+
+```{r}
+tmap_arrange(skater_clus_map, skater_a_map)
+```
+
+We put hierarchical clustering along with SKATER clustering with alpha.
+
+```{r}
+tmap_arrange(h_clus_map, skater_a_map)
+```
+
+## 5. Cluster Analysis and Conclusion
+
+We look at the clustering performed by SKATER with alpha using parallel cordinates
+
+```{r}
+nga_wp_p_Gcluster %>%
+  filter(`CLUSTER` %in% c(1,2,3)) %>%
+  ggparcoord(., 
+           columns = c(15,18, 19,23,24), 
+           scale = "globalminmax",
+           alphaLines = 0.1,
+           boxplot = TRUE, 
+           title = "Multiple Parallel Coordinates Plots by Cluster 1,2,3")+
+  facet_grid(~ CLUSTER) + 
+  theme(axis.text.x = element_text(angle = 30))
+```
+
+```{r}
+nga_wp_p_Gcluster %>%
+  filter(`CLUSTER` %in% c(4,5)) %>%
+  ggparcoord(., 
+           columns = c(15,18,19,23,24), 
+           scale = "globalminmax",
+           alphaLines = 0.1,
+           boxplot = TRUE, 
+           title = "Multiple Parallel Coordinates Plots by Cluster 4 and 5")+
+  facet_grid(~ CLUSTER) + 
+  theme(axis.text.x = element_text(angle = 30))
+```
+
+```{r}
+skater_a_map
+```
+
+Cluster 1 (Dark purple): Areas in cluster 1 have high percentage of mechanical pumps and the water usage capacity is higher that other clusters. It is also located in rural areas and lower proportion of working pumps.
+
+Cluster 2 (Light purple): Areas in cluster 2 have low percentage of mechanical pumps but high percentage of hand pumps. Water usage capacity is lower than other segments. It is also located in rural areas and moderate proportion of working pumps. Many towns lie in this cluster.
+
+Cluster 3 (White): Areas in cluster 3 have moderate percentage of mechanical pumps, low to moderate hand pumps, relatively lower water usage capacity and a mix of water points in rural and non rural areas.
+
+Cluster 4 (Light green): Areas in cluster 4 have low percentage of mechanical pumps, high proportions of hand pumps, low water usage capacity and are located mainly in rural areas. Thankfully the pumps are functional. Many of the points lie in this cluster.
+
+Cluster 5 (Green): Areas in cluster 5 have low percentage of mechanical pumps, high proportions of hand pumps, low water usage capacity and are located mainly in urban areas. Proportion of this working pumps are also high.
+
+## Conclusion:
+
+```{r}
+table(nga_wp_p_Gcluster$CLUSTER)
+```
+
+In clustering data, it is perfectly fine clustering without considering spatial effect as it is our choice. However rarely that spatial data have attributes that are constant in space. Hence clustering while considering spatial impact is a better clustering technique than without.
+
+Depending on which columns you drop due to multicollinearity issue, we might get a different clustering result. Additionanlly, although we chose 5 clusters, the clustering results seem to be more suited to 4 clusters as cluster 5 only has 1 member. Cluster 5 might be an outlier
+
+[**Future work:**]{.underline}
+
+-   Try dropping different combinations of correlated columns and choose the best cluster result
+
+-   Try increasing number of clusters such that there is global maximum of gap statistics
+
+-   Cluster based on 4 classes
+
+-   Explore optimal number of classes to optimse
+
+-   Try other linkage methods to build proximity matrix and see if clustering performance improves.
