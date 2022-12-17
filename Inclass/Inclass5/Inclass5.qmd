@@ -1,0 +1,518 @@
+---
+title: "Inclass5"
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+# Overview
+
+Predict the functionality of a water point based on a set of variables. We will build a prediction model using global generalized regression model and geographically weighted generalised regression model and compare the performance of these models using a set of evaluation metrics.
+
+## Independent Variables:
+
+There are 2 data sets. One contains Local Government Boundary data and the other contains the water point location.
+
+## Independent Variables:
+
+-   Distance to primary road
+
+-   Distance to secondary road
+
+-   Distance to tertiary road
+
+-   Distance to city
+
+-   Distance to town
+
+-   Water Point population
+
+-   Local Population 1KM
+
+-   Usage capacity
+
+-   Urban
+
+-   Water Source Clean
+
+## Dependent Variable:
+
+There are only 2 outcomes for the status water point. It is either functional or non-functional. It is a binary variable. Since this violates the linearity assumptions, linear regression cannot be used.
+
+## Benefits of Logistic Regression:
+
+Logistic regression allows us to relax a lot of assumptions.
+
+-   Logistic Regression does not assume a linear relationship between dependent and independent variables
+
+-   The independent variables need not be interval nor normally distributed nor linearly related, nor equal variance within each group
+
+## Limitations of Logistic Regression:
+
+-   Large Sample of data is needed
+
+    -   This is because Logistic regression uses maximum likelihood algorithm which maximises the probability and this requires more data
+
+# 1.Data Preparation
+
+We load the packages needed and install them if needed. Packages needed are:
+
+-   **sf, spdep, tmap, tidyverse, funModeling, shinyjs, cluster, factoextra, heatmaply, ClustGeo, GGally**
+
+First, we use pacman to load in the library we need.
+
+```{r}
+pacman::p_load(sf, spdep, tmap, tidyverse, funModeling, shinyjs, cluster, factoextra, heatmaply, ClustGeo, GGally, ggpubr, corrplot, blorr, GWmodel, skimr, caret, stats)
+
+# install.packages("caret", dependencies = TRUE)
+library("caret")
+```
+
+Next, we are going to import the data
+
+```{r}
+Osun <- read_rds("rds/Osun.rds")
+Osun_wp_sf <- read_rds("rds/Osun_wp_sf.rds")
+```
+
+We take a look at the column data type and its first few instances.
+
+```{r}
+glimpse(Osun)
+```
+
+```{r}
+glimpse(Osun_wp_sf)
+```
+
+```{r}
+Osun_wp_sf %>%
+  freq(input = 'status')
+```
+
+There are 2 categories of status - true and false. 55.5% are true and 44.5% are false.
+
+We use the skim() function to help us with our EDA. It shows us the summary statistics. Regression models are sensitive to missing values. We can identify some of the columns with many missing fields using this method. We will not be using columns where there are too many missing values. If there are just a few, we remove those rows of data point.
+
+```{r}
+Osun_wp_sf %>%
+  skim()
+```
+
+We remove missing values with below code chunk:
+
+```{r}
+Osun_wp_sf_clean <- Osun_wp_sf %>%
+  filter_at(vars(status,
+                 distance_to_primary_road,
+                 distance_to_secondary_road,
+                 distance_to_city,
+                 distance_to_town,
+                 water_point_population,
+                 local_population_1km,
+                 usage_capacity,
+                 is_urban,
+                 water_source_clean),
+            all_vars(!is.na(.))) %>%
+  mutate(usage_capacity = as.factor(usage_capacity))
+
+```
+
+We convert usage capacity as a category by using as.factor. Data is now categorical instead of numerical.
+
+### 1.1 Correlation Analysis
+
+To do correlation analysis, it does not recognise data format with geometry. Hence we set it as NULL to remove it.
+
+```{r}
+Osun_wp <- Osun_wp_sf_clean %>%
+  select(c(7,35:39, 42:43, 46:47, 57)) %>%
+  st_set_geometry(NULL)
+```
+
+We take a subset of the Osun_wp from column 2 to 7.
+
+```{r}
+cluster_vars.cor = cor(
+  Osun_wp[,2:7])
+
+corrplot.mixed(cluster_vars.cor,
+               lower = "ellipse",
+               upper = "number",
+               tl.pos = "lt",
+               diag = "l",
+               tl.col = "black")
+
+```
+
+None of them have high correlation. There will be no problem of multicollinearity.We can start building out model.
+
+## 2. Building Global Regression Model
+
+```{r}
+model <- glm(status ~ distance_to_primary_road +
+               distance_to_secondary_road +
+               distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sf_clean,
+             family = binomial(link = "logit"))
+```
+
+We check the summary of the model using blr_regress.
+
+```{r}
+blr_regress(model)
+```
+
+Most of the features are significant predictors to use except for: distance_to_primary_road and distance_to_secondary_road.
+
+Among the significant predictors, there is negative correlation for is_urban_true and usage_capacity1000 feature. Rest of the features have a positive correlation.
+
+### 2.1 Model Evaluation
+
+```{r}
+blr_confusion_matrix(model, cutoff = 0.5)
+```
+
+Next, we evaluate the performance of the model. We set the cut off probability as 0.5. If probability outputted by LR model is greater than 0.5, it is a functional water point. Otherwise non-functional water point.
+
+We compare the predicted values against the actual value. The accuracy of model is 67% and sensitivity/ true positive rate is 72% which is a moderate classifying performance.
+
+### 2.2 Model Improvement
+
+As we have determined the distance to primary road and distance to secondary road are insignificant features, we will remove it from our model building and rerun the summary report to see if there is an improvement.
+
+```{r}
+model_cleaned <- glm(status ~ distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sf_clean,
+             family = binomial(link = "logit"))
+
+blr_regress(model_cleaned)
+```
+
+```{r}
+blr_confusion_matrix(model_cleaned, cutoff = 0.5)
+```
+
+Accuracy remains at 67% and senstivity/ true positive rate reamins at 72%.
+
+How can we improve the model? We can improve the model by adding geographical weights using the GW model.
+
+## 3. Model building with Geographical Weights using GWR method
+
+GW model takes in only spatial dataframe format. Hence we need to convert it using the as_Spatial() method.
+
+```{r}
+Osun_wp_sp <- Osun_wp_sf_clean %>%
+  select(c(status, distance_to_primary_road,
+               distance_to_secondary_road,
+               distance_to_tertiary_road,
+               distance_to_city,
+               distance_to_town,
+           water_point_population,
+           local_population_1km,
+           is_urban,
+           usage_capacity,
+           water_source_clean)) %>%
+  as_Spatial()
+Osun_wp_sp
+
+```
+
+Next we calculate the distance bandwidth metrics. We use the fixed distance bandwidth metrics here.
+
+```{r}
+#| eval: false
+bw.fixed <- bw.ggwr(status ~ distance_to_primary_road +
+               distance_to_secondary_road +
+               distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sp,
+             family = "binomial",
+             approach = "AIC",
+             kernel = "gaussian",
+             adaptive = FALSE,
+             longlat = FALSE)
+```
+From above it is found bw.fixed is 2599.672.
+
+```{r}
+bw.fixed <- 2599.672
+bw.fixed
+```
+
+The fixed bandwidth distance used will be 2599.672m. We build the geographical weighted generalised model using the ggwr.fixed() method and defining the fixed bandwith distance to use.
+
+```{r}
+gwlr.fixed <- ggwr.basic(status ~ distance_to_primary_road +
+               distance_to_secondary_road +
+               distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sp,
+             bw = bw.fixed,
+             family = "binomial",
+             kernel = "gaussian",
+             adaptive = FALSE,
+             longlat = FALSE)
+```
+
+```{r}
+gwlr.fixed
+```
+
+Geographically weighted generalized regression works by building multiple generalized linear models for locations in same bandwidth. Each model has their own localized geographical weights.
+
+We observe like in the global generalised linear model, the metrics distance to primary road and distance to secondary road are not significant as they have p values higher than 0.05.
+
+From the summary report above, we can also see the model with geographical weights performs better with a lower AIC . Hence it is a better model with geographical weights.
+
+### 3.1 Model Comparison
+
+We want to compute a confusion matrix. We need to cover the SDF object into a date frame.
+
+```{r}
+gwr.fixed <- as.data.frame(gwlr.fixed$SDF)
+```
+
+We will label predicted values with probability higher than 0.5 into 1 and else 0. The result will be saved as most column.
+
+```{r}
+gwr.fixed <- gwr.fixed %>%
+  mutate(most = ifelse(
+    gwr.fixed$yhat >= 0.5, T, F))
+```
+
+There is no easy method to print out confusion report. Hence we create our own using confusion Matrix from caret library using the actual values column and gwr.fixed and the newly appended column "most".
+
+```{r}
+gwr.fixed$y <- as.factor(gwr.fixed$y)
+gwr.fixed$most <- as.factor(gwr.fixed$most)
+CM <- confusionMatrix(data=gwr.fixed$most, reference = gwr.fixed$y)
+CM
+
+```
+
+By using geographical weighted model, the sensitivity has improved to 86.3% and accuracy to 88.4%.
+
+### 3.2 Model Improvement
+
+Can we improve the model if we remove the insignificant variables? We create the distance bandwidth metrics without the "distance to primary road" and "distance to secondary road" metrics.
+
+```{r}
+#| eval: false
+bw.fixed_cleaned <- bw.ggwr(status ~ distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sp,
+             family = "binomial",
+             approach = "AIC",
+             kernel = "gaussian",
+             adaptive = FALSE,
+             longlat = FALSE)
+```
+
+Lets check what bandwidth we should use.
+
+```{r}
+bw.fixed_cleaned <- 2377.371
+bw.fixed_cleaned
+```
+
+The optimal fixed bandwith distance to use it 2377.371m. Next we build the model using the distance bandwidth matrix built earlier.
+
+```{r}
+gwlr.fixed_cleaned <- ggwr.basic(status ~distance_to_tertiary_road +
+               distance_to_city +
+               distance_to_town +
+               is_urban +
+               usage_capacity +
+               water_source_clean +
+               water_point_population +
+               local_population_1km,
+             data = Osun_wp_sp,
+             bw = bw.fixed_cleaned,
+             family = "binomial",
+             kernel = "gaussian",
+             adaptive = FALSE,
+             longlat = FALSE)
+```
+
+Next we check the model evaluation metrics
+
+```{r}
+gwr.fixed_cleaned <- as.data.frame(gwlr.fixed_cleaned$SDF)
+gwr.fixed_cleaned <- gwr.fixed_cleaned %>%
+  mutate(most = ifelse(
+    gwr.fixed_cleaned$yhat >= 0.5, T, F))
+gwr.fixed_cleaned$y <- as.factor(gwr.fixed_cleaned$y)
+gwr.fixed_cleaned$most <- as.factor(gwr.fixed_cleaned$most)
+CM_cleaned <- confusionMatrix(data=gwr.fixed_cleaned$most, reference = gwr.fixed_cleaned$y)
+CM_cleaned
+```
+
+By removing the insignificant variables using geographical weighted model, the sensitivity has improved to 86.7% from 86.3% while accuracy remains the same at 88.4%.
+
+## 4. Visualization
+
+Next we visualize the Local government areas water point functionality prediction. We set tm_dots to display only 2 categories - below 0.5 and above 0.5
+
+```{r}
+Osun_wp_sf_selected <- Osun_wp_sf_clean %>%
+  select(c(ADM2_EN, ADM2_PCODE,ADM1_EN, ADM1_PCODE, status))
+```
+
+```{r}
+gwr_sf.fixed <- cbind(Osun_wp_sf_selected, gwr.fixed_cleaned)
+```
+
+```{r}
+tmap_mode("view")
+
+prob_t <- tm_shape(Osun) + 
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "yhat",
+          border.col = "gray60",
+          border.lwd = 1,
+          n=2) +
+  tm_view(set.zoom.limits = c(8,14))
+
+prob_t
+```
+
+We also plot the original graph with original values.
+
+```{r}
+og_y <- tm_shape(Osun) + 
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "y",
+          border.col = "gray60",
+          border.lwd = 1,
+          n=2, 
+          palette = "Blues") +
+  tm_view(set.zoom.limits = c(8,14))
+
+og_y
+```
+
+We put them side by side. As we can see there are more misclassifications in the North West region. The predicted values predicted more TRUE (False Positives) than Actual TRUE.
+
+### 4.1 Tuning Threshold
+
+One way to address it is to increase the threshold. This reduces the number of False Positive but increases the number of False Negative.
+
+In this context, a model that predicts less False positive is preferred because it is a more conservative approach to monitor water point functionality. It will be worse off if taps that are not working are marked as working thus shortchaning it of timely repairs which in return deprives villagers from access to water.
+
+```{r}
+tmap_arrange(prob_t,og_y)
+```
+
+We increase threshold to 0.6.
+
+```{r}
+gwr.fixed_cleaned <- as.data.frame(gwlr.fixed_cleaned$SDF)
+gwr.fixed_cleaned <- gwr.fixed_cleaned %>%
+  mutate(most = ifelse(
+    gwr.fixed_cleaned$yhat >= 0.6, T, F))
+gwr.fixed_cleaned$y <- as.factor(gwr.fixed_cleaned$y)
+gwr.fixed_cleaned$most <- as.factor(gwr.fixed_cleaned$most)
+CM_cleaned <- confusionMatrix(data=gwr.fixed_cleaned$most, reference = gwr.fixed_cleaned$y)
+CM_cleaned
+
+gwr_sf.fixed2 <- cbind(Osun_wp_sf_selected, gwr.fixed_cleaned)
+
+prob_t_2 <- tm_shape(Osun) + 
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed2) +
+  tm_dots(col = "yhat",
+          border.col = "gray60",
+          border.lwd = 1,
+          breaks = c(0,0.6,1)) +
+  tm_view(set.zoom.limits = c(8,14))
+
+
+og_y_2 <- tm_shape(Osun) + 
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed2) +
+  tm_dots(col = "y",
+          border.col = "gray60",
+          border.lwd = 1, 
+          palette = "Blues") +
+  tm_view(set.zoom.limits = c(8,14))
+```
+
+Increasing threshold has improved the sensitivity. Now we visualize it in a graph. The 2 graphs look more similar.
+
+```{r}
+tmap_arrange(prob_t_2,og_y_2)
+```
+
+### 4.2 Visualising Metrics
+
+We can also visualize the metrics of the variables. gwr_sf.fixed contains both original values (ends with SE) and t statistics value (TV).
+
+```{r}
+tertiary_TV <- tm_shape(Osun) +
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "distance_to_tertiary_road_TV", border.col = "gray60", border.lwd=4, palette = "Purples") +
+  tm_view(set.zoom.limits = c(8,14))
+
+tertiary_SE <- tm_shape(Osun) +
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "distance_to_tertiary_road_SE", border.col = "gray60", border.lwd=4) +
+  tm_view(set.zoom.limits = c(8,14))
+
+
+tmap_arrange(tertiary_SE, tertiary_TV, asp=1, ncol=2, sync = TRUE)
+```
+
+```{r}
+town_TV <- tm_shape(Osun) +
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "distance_to_town_TV", border.col = "gray60", border.lwd=4, palette = "Purples") +
+  tm_view(set.zoom.limits = c(8,14))
+
+town_SE <- tm_shape(Osun) +
+  tm_polygons(alpha = 0.1) +
+  tm_shape(gwr_sf.fixed) +
+  tm_dots(col = "distance_to_town_SE", border.col = "gray60", border.lwd=4) +
+  tm_view(set.zoom.limits = c(8,14))
+
+
+tmap_arrange(town_SE, town_TV, asp=1, ncol=2, sync = TRUE)
+```
